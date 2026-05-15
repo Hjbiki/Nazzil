@@ -7,6 +7,16 @@ import re
 
 
 # ---------------------------------------------------------------------------
+# App identity / release metadata
+# ---------------------------------------------------------------------------
+APP_VERSION = "1.0.0"
+GITHUB_REPO = "Hjbiki/Nazzil"
+# Set to a personal-access-token string for private-repo testing.
+# Leave empty for public releases (no auth header sent).
+GITHUB_TOKEN = ""
+
+
+# ---------------------------------------------------------------------------
 # Paths — keep existing filenames so old user configs migrate cleanly.
 # ---------------------------------------------------------------------------
 CONFIG_PATH = os.path.join(

@@ -1,11 +1,23 @@
 # -*- coding: utf-8 -*-
 """Qt-native system tray icon. Replaces the old pystray + plyer combo."""
 
+import os
+
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from i18n import t
+
+
+def _fallback_icon():
+    """Load assets/icon.png if the caller didn't pass an icon."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    # assets/ sits next to ui/, so go up one level.
+    candidate = os.path.normpath(os.path.join(here, "..", "assets", "icon.png"))
+    if os.path.exists(candidate):
+        return QIcon(candidate)
+    return QIcon()
 
 
 class Tray(QObject):
@@ -15,8 +27,10 @@ class Tray(QObject):
     show_requested = Signal()
     exit_requested = Signal()
 
-    def __init__(self, icon: QIcon, parent=None):
+    def __init__(self, icon: QIcon = None, parent=None):
         super().__init__(parent)
+        if icon is None or icon.isNull():
+            icon = _fallback_icon()
         self._icon_obj = QSystemTrayIcon(icon, parent)
         self._icon_obj.setToolTip(t("app_short"))
 

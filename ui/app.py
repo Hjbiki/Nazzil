@@ -9,9 +9,9 @@ import shutil
 import threading
 
 from PIL import Image
-from PySide6.QtCore import (QEvent, QObject, QTimer, Qt, Signal, Slot)
-from PySide6.QtGui import (QAction, QGuiApplication, QIcon, QKeySequence,
-                           QPixmap, QShortcut)
+from PySide6.QtCore import (QEvent, QObject, QTimer, QUrl, Qt, Signal, Slot)
+from PySide6.QtGui import (QAction, QDesktopServices, QGuiApplication, QIcon,
+                           QKeySequence, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox,
                                QComboBox, QFileDialog, QFrame, QHBoxLayout,
                                QLabel, QLineEdit, QMainWindow, QMenu,
@@ -28,6 +28,8 @@ from ui.dialogs import (AccountDialog, SettingsDialog, conflict_dialog,
                         duplicate_dialog, rename_dialog)
 from ui.download_row import DownloadRow
 from ui.tray import Tray
+from updater import (UpdateChecker, UpdateDownloader, current_exe_path,
+                     github_release_url, is_frozen, launch_updater)
 from utils import (classify_error, clean_error, extract_video_id,
                    fetch_image_bytes, fmt_duration, sanitize_filename,
                    truncate)
@@ -122,6 +124,11 @@ class App(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(18, 14, 18, 14)
         root.setSpacing(10)
+
+        # ----- UPDATE BANNER (hidden until updater fires) -----
+        self._build_update_banner()
+        root.addWidget(self.update_banner)
+        self.update_banner.hide()
 
         # ----- TOP BAR -----
         top = QHBoxLayout()
@@ -353,6 +360,126 @@ class App(QMainWindow):
         panel_layout.addLayout(footer)
 
         root.addWidget(panel, 1)
+
+    # ==================================================================
+    # Update banner — built as part of _build_ui
+    # ==================================================================
+    def _build_update_banner(self):
+        """Slim banner that surfaces 'update available'. Hidden by default."""
+        self.update_banner = QFrame()
+        self.update_banner.setObjectName("UpdateBanner")
+        self.update_banner.setStyleSheet(
+            "QFrame#UpdateBanner {"
+            "  background: #1F2240;"
+            "  border: 1px solid #525E9E;"
+            "  border-radius: 10px;"
+            "}"
+        )
+        self.update_banner.setFixedHeight(44)
+
+        lay = QHBoxLayout(self.update_banner)
+        lay.setContentsMargins(14, 4, 8, 4)
+        lay.setSpacing(8)
+
+        self.update_label = QLabel("")
+        self.update_label.setStyleSheet("color: #F7F8F8; font-size: 12px;")
+        lay.addWidget(self.update_label, 1)
+
+        self.update_progress = QProgressBar()
+        self.update_progress.setRange(0, 1000)
+        self.update_progress.setValue(0)
+        self.update_progress.setTextVisible(False)
+        self.update_progress.setFixedWidth(180)
+        self.update_progress.hide()
+        lay.addWidget(self.update_progress)
+
+        self.update_action_btn = QPushButton(t("update_now"))
+        self.update_action_btn.setCursor(Qt.PointingHandCursor)
+        self.update_action_btn.clicked.connect(self._on_update_now)
+        lay.addWidget(self.update_action_btn)
+
+        self.update_dismiss_btn = QPushButton("✕")
+        self.update_dismiss_btn.setProperty("role", "kebab")
+        self.update_dismiss_btn.setCursor(Qt.PointingHandCursor)
+        self.update_dismiss_btn.clicked.connect(self.update_banner.hide)
+        lay.addWidget(self.update_dismiss_btn)
+
+        # internal state
+        self._update_tag = ""
+        self._update_asset_url = ""
+        self._update_size = 0
+
+    # ==================================================================
+    # Update flow
+    # ==================================================================
+    def start_update_check(self):
+        """Called by main.py after the window is shown."""
+        self._update_checker = UpdateChecker(self)
+        self._update_checker.update_available.connect(self._on_update_available)
+        self._update_checker.check_failed.connect(lambda _msg: None)
+        self._update_checker.no_update.connect(lambda: None)
+        self._update_checker.start()
+
+    @Slot(str, str, int)
+    def _on_update_available(self, tag, asset_url, size):
+        self._update_tag = tag
+        self._update_asset_url = asset_url
+        self._update_size = size
+        if is_frozen() and asset_url:
+            self.update_label.setText(t("update_available", version=tag))
+            self.update_action_btn.setText(t("update_now"))
+        else:
+            # source run OR release missing the portable exe → link out instead
+            self.update_label.setText(t("update_source_hint", version=tag))
+            self.update_action_btn.setText(t("update_open_github"))
+        self.update_progress.hide()
+        self.update_action_btn.setEnabled(True)
+        self.update_banner.show()
+
+    @Slot()
+    def _on_update_now(self):
+        if not is_frozen() or not self._update_asset_url:
+            QDesktopServices.openUrl(QUrl(github_release_url()))
+            return
+        # start the download
+        self.update_action_btn.setEnabled(False)
+        self.update_progress.show()
+        self.update_progress.setValue(0)
+        self.update_label.setText(
+            t("update_downloading", percent=0))
+        self._update_downloader = UpdateDownloader(self)
+        self._update_downloader.progress.connect(self._on_update_progress)
+        self._update_downloader.download_done.connect(self._on_update_downloaded)
+        self._update_downloader.download_failed.connect(self._on_update_failed)
+        self._update_downloader.start(self._update_asset_url)
+
+    @Slot(float)
+    def _on_update_progress(self, frac):
+        v = max(0, min(1000, int(frac * 1000)))
+        self.update_progress.setValue(v)
+        self.update_label.setText(
+            t("update_downloading", percent=int(frac * 100)))
+
+    @Slot(str)
+    def _on_update_downloaded(self, local_path):
+        self.update_label.setText(t("update_ready"))
+        self.update_action_btn.hide()
+        self.update_dismiss_btn.hide()
+        exe = current_exe_path()
+        if not exe:
+            return
+        try:
+            launch_updater(local_path, exe)
+        except Exception:
+            return
+        # let the user see "restarting…" briefly, then quit
+        QTimer.singleShot(800, self._tray_exit)
+
+    @Slot(str)
+    def _on_update_failed(self, msg):
+        self.update_label.setText(t("update_dl_failed", msg=msg))
+        self.update_progress.hide()
+        self.update_action_btn.setEnabled(True)
 
     def _make_segmented(self, items, on_change, current):
         """Build a QButtonGroup of tab-styled QPushButtons. `items` is a list

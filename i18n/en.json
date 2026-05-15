@@ -150,5 +150,14 @@
   "err_cookie_db_unreadable": "Couldn't read browser cookie database. Fully quit the browser (incl. tray/background) or use a cookies.txt file / Firefox.",
   "err_auth_with_cookies": "Cookies didn't work — they may be expired. Refresh your cookies.txt, or relog in the browser you selected.",
   "err_auth_no_cookies": "Login required — pick a cookie source in 🔐 account.",
-  "err_416": "Partial file mismatch (416) — auto-retrying with a clean restart…"
+  "err_416": "Partial file mismatch (416) — auto-retrying with a clean restart…",
+
+  "update_available": "Update available: {version}",
+  "update_now": "Update now",
+  "update_dismiss": "Dismiss",
+  "update_downloading": "Downloading update… {percent}%",
+  "update_ready": "Update ready — restarting Nazzil…",
+  "update_source_hint": "Update available: {version} — running from source. Download from GitHub.",
+  "update_open_github": "Open GitHub",
+  "update_dl_failed": "Update download failed: {msg}"
 }
