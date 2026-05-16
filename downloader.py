@@ -210,6 +210,19 @@ class DownloadItem(QObject):
                     with yt_dlp.YoutubeDL(build_opts()) as ydl:
                         ydl.download([self.url])
                     self.status = "completed"
+                    # ---- Resolve the actual on-disk output file ----
+                    # Reported `size_bytes` from the progress hook is the
+                    # size of a single stream (video OR audio), not the
+                    # merged output. Read the real file size now.
+                    if not (self.filepath and os.path.exists(self.filepath)):
+                        # try the predicted name first, then a folder scan
+                        expected = self.expected_filename()
+                        if os.path.exists(expected):
+                            self.filepath = expected
+                        else:
+                            found = self._find_output_file()
+                            if found:
+                                self.filepath = found
                     if self.filepath and os.path.exists(self.filepath):
                         self.size_on_disk = file_size(self.filepath)
                     self.state_changed.emit()
@@ -270,9 +283,53 @@ class DownloadItem(QObject):
     def _pp_hook(self, d):
         if d.get("status") == "finished":
             info = d.get("info_dict") or {}
-            fp = info.get("filepath") or info.get("_filename")
-            if fp:
-                self.filepath = fp
+            # The most reliable source for the FINAL on-disk path is
+            # `requested_downloads`, populated by yt-dlp after every
+            # post-processor (Merge, ExtractAudio, EmbedThumbnail, …)
+            # has run. Walk it last so we keep the most recent path.
+            for req in info.get("requested_downloads") or []:
+                req_fp = req.get("filepath") or req.get("_filename")
+                if req_fp:
+                    self.filepath = req_fp
+            # Fall back to whatever the top-level info_dict carries.
+            if not self.filepath:
+                fp = info.get("filepath") or info.get("_filename")
+                if fp:
+                    self.filepath = fp
+
+    def _find_output_file(self):
+        """Last-ditch scan: pick the most-recently-modified file in `folder`
+        whose name shares a long-enough prefix with our title (sanitised).
+        Strips both `\\W` AND underscores so 'My Cool Video' matches
+        'My_Cool_Video.mp4' (yt-dlp commonly substitutes spaces with `_`)."""
+        folder = self.folder
+        if not folder or not os.path.isdir(folder):
+            return ""
+        title_key = re.sub(r"[\W_]+", "",
+                           self.custom_filename or self.title)[:20].lower()
+        if not title_key or len(title_key) < 4:
+            return ""
+        target_ext = ".mp3" if self.fmt == "mp3" else ".mp4"
+        candidates = []
+        try:
+            for fname in os.listdir(folder):
+                if not fname.lower().endswith(target_ext):
+                    continue
+                if fname.endswith(".part") or fname.endswith(".ytdl"):
+                    continue
+                name_key = re.sub(r"[\W_]+", "", fname).lower()
+                if title_key in name_key:
+                    fp = os.path.join(folder, fname)
+                    try:
+                        candidates.append((os.path.getmtime(fp), fp))
+                    except Exception:
+                        continue
+        except Exception:
+            return ""
+        if not candidates:
+            return ""
+        candidates.sort(reverse=True)
+        return candidates[0][1]
 
     # ------------------------------------------------------------------
     # Persistence

@@ -9,7 +9,25 @@ import re
 # ---------------------------------------------------------------------------
 # App identity / release metadata
 # ---------------------------------------------------------------------------
-APP_VERSION = "1.0.0"
+def _read_version():
+    """Single source of truth — read the project's VERSION file.
+
+    Works both from source (file next to config.py) and from a PyInstaller
+    one-file bundle (file extracted to sys._MEIPASS, which is also the dir
+    config.py is loaded from)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "VERSION")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            v = f.read().strip()
+            if v:
+                return v
+    except Exception:
+        pass
+    return "0.0.0"
+
+
+APP_VERSION = _read_version()
 GITHUB_REPO = "Hjbiki/Nazzil"
 # Set to a personal-access-token string for private-repo testing.
 # Leave empty for public releases (no auth header sent).

@@ -3,9 +3,23 @@
 
 Build:    pyinstaller nazzil.spec
 Output:   dist/Nazzil.exe
+
+Version is read from the VERSION file (single source of truth — same file
+that config.py and installer.iss read).
 """
 
+import os
+
 block_cipher = None
+
+# SPECPATH is provided by PyInstaller and points at the directory of THIS file.
+try:
+    _here = SPECPATH  # noqa: F821 (provided by PyInstaller)
+except NameError:
+    _here = os.path.dirname(os.path.abspath(__file__))
+
+with open(os.path.join(_here, "VERSION"), "r", encoding="utf-8") as _vf:
+    APP_VERSION = _vf.read().strip()
 
 
 a = Analysis(
@@ -13,6 +27,7 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=[
+        ('VERSION',         '.'),       # bundled at the root of _MEIPASS
         ('assets/icon.png', 'assets'),
         ('assets/icon.ico', 'assets'),
         ('i18n/ar.json',    'i18n'),
@@ -60,4 +75,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/icon.ico',
+    version_file=None,
 )

@@ -47,20 +47,32 @@ def github_release_url() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Version comparison — tolerant of "v1.2.3", "1.2.3-beta", etc.
+# Version comparison — tolerant of "v1.2.3", "1.2.3-beta", "1.2", etc.
 # ---------------------------------------------------------------------------
 def parse_version(tag: str):
+    """Return a normalised 3-tuple of ints: (major, minor, patch).
+
+    Tolerates a leading 'v', drops pre-release / build suffixes
+    ('1.2.3-beta', '1.2.3+build7' → (1, 2, 3)), and zero-pads short
+    versions ('1.2' → (1, 2, 0)) so comparison is well-defined."""
     if not tag:
-        return (0,)
-    s = tag.lstrip("vV")
+        return (0, 0, 0)
+    s = tag.strip().lstrip("vV")
+    # Drop anything after '-' / '+' / whitespace (pre-release / build meta).
+    for sep in ("-", "+", " "):
+        if sep in s:
+            s = s.split(sep, 1)[0]
     parts = []
     for chunk in s.split("."):
         digits = "".join(ch for ch in chunk if ch.isdigit())
         parts.append(int(digits) if digits else 0)
-    return tuple(parts)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
 
 
 def is_newer(remote_tag: str, local_version: str) -> bool:
+    """True iff remote is strictly greater than local. Same version → False."""
     return parse_version(remote_tag) > parse_version(local_version)
 
 
