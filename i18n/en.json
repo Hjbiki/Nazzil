@@ -159,5 +159,25 @@
   "update_ready": "Update ready — restarting Nazzil…",
   "update_source_hint": "Update available: {version} — running from source. Download from GitHub.",
   "update_open_github": "Open GitHub",
-  "update_dl_failed": "Update download failed: {msg}"
+  "update_dl_failed": "Update download failed: {msg}",
+
+  "status_up_to_date": "Up to date",
+  "status_checking": "Checking for updates…",
+  "status_unknown": "Not checked",
+  "status_check_failed": "Update check failed",
+  "status_update_available": "Update available: {version}",
+  "status_update_button": "Update",
+  "check_for_updates": "Check for updates",
+
+  "per_page": "{n} / page",
+  "per_page_all": "All",
+
+  "about": "About",
+  "about_title": "About Nazzil",
+  "about_developed_by": "Developed by عناد (Anad)",
+  "about_visit_site": "Visit website",
+  "about_donate": "Support / ادعمني",
+  "about_powered_by": "Powered by yt-dlp",
+  "about_version_label": "Version {version}",
+  "close": "Close"
 }

@@ -108,6 +108,13 @@ class DownloadRow(QFrame):
         self.title_label.mousePressEvent = lambda e: self.open_rename()
         mid.addWidget(self.title_label)
 
+        # uploader / channel — small muted line beneath the title
+        self.uploader_label = QLabel(self.item.uploader or "")
+        self.uploader_label.setObjectName("Hint")
+        self.uploader_label.setStyleSheet("font-size: 11px; color: #8A8F98;")
+        self.uploader_label.setVisible(bool(self.item.uploader))
+        mid.addWidget(self.uploader_label)
+
         # badges row
         badges = QHBoxLayout()
         badges.setContentsMargins(0, 0, 0, 0)
@@ -333,3 +340,16 @@ class DownloadRow(QFrame):
         self.removed.emit(self.item)
         if self.app:
             self.app.remove_item(self.item)
+
+    # ------------------------------------------------------------------
+    # Live language switch — every visible string here is derived from
+    # data + t(), so this simply re-runs the visual update.
+    # ------------------------------------------------------------------
+    def retranslate(self):
+        try:
+            self.title_label.setText(self._display_title())
+            self.uploader_label.setText(self.item.uploader or "")
+            self.uploader_label.setVisible(bool(self.item.uploader))
+            self._apply_status_visuals()
+        except Exception:
+            pass

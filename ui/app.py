@@ -13,19 +13,19 @@ from PySide6.QtCore import (QEvent, QObject, QTimer, QUrl, Qt, Signal, Slot)
 from PySide6.QtGui import (QAction, QDesktopServices, QGuiApplication, QIcon,
                            QKeySequence, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox,
-                               QComboBox, QFileDialog, QFrame, QHBoxLayout,
-                               QLabel, QLineEdit, QMainWindow, QMenu,
-                               QMessageBox, QProgressBar, QPushButton,
+                               QComboBox, QDialog, QFileDialog, QFrame,
+                               QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+                               QMenu, QMessageBox, QProgressBar, QPushButton,
                                QScrollArea, QSizePolicy, QSystemTrayIcon,
                                QVBoxLayout, QWidget)
 import yt_dlp
 
-from config import (DOWNLOADS_PATH, PREVIEW_H, PREVIEW_W, YT_PLAYLIST_RE,
-                    YT_URL_RE, load_config, save_config)
+from config import (APP_VERSION, DOWNLOADS_PATH, PREVIEW_H, PREVIEW_W,
+                    YT_PLAYLIST_RE, YT_URL_RE, load_config, save_config)
 from downloader import DownloadItem
 from i18n import Translator, t
-from ui.dialogs import (AccountDialog, SettingsDialog, conflict_dialog,
-                        duplicate_dialog, rename_dialog)
+from ui.dialogs import (AccountDialog, AboutDialog, SettingsDialog,
+                        conflict_dialog, duplicate_dialog, rename_dialog)
 from ui.download_row import DownloadRow
 from ui.tray import Tray
 from updater import (UpdateChecker, UpdateDownloader, current_exe_path,
@@ -65,6 +65,11 @@ class App(QMainWindow):
         self.cfg.setdefault("clipboard_watch", True)
         self.cfg.setdefault("minimize_to_tray", True)
         self.cfg.setdefault("lang", Translator.lang())
+        self.cfg.setdefault("per_page", 15)   # 15 | 30 | 50 | 0 (= all)
+
+        # Pagination
+        self.page_size = int(self.cfg.get("per_page", 15) or 0)
+        self.current_page = 1
 
         # ---- state ----
         self.current_info = None
@@ -146,6 +151,7 @@ class App(QMainWindow):
         self.url_entry = QLineEdit()
         self.url_entry.setObjectName("UrlEntry")
         self.url_entry.setPlaceholderText(t("url_placeholder"))
+        self.url_entry.setClearButtonEnabled(True)
         self.url_entry.returnPressed.connect(self._fetch)
         self.url_entry.textChanged.connect(self._on_url_change)
         self.url_entry.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -313,6 +319,7 @@ class App(QMainWindow):
         self.search_entry = QLineEdit()
         self.search_entry.setObjectName("SearchEntry")
         self.search_entry.setPlaceholderText(t("search_downloads"))
+        self.search_entry.setClearButtonEnabled(True)
         self.search_entry.setFixedWidth(260)
         self.search_entry.textChanged.connect(self._on_search)
         header.addWidget(self.search_entry)
@@ -353,13 +360,46 @@ class App(QMainWindow):
         self.list_scroll.setWidget(self.list_inner)
         panel_layout.addWidget(self.list_scroll, 1)
 
+        # ---- Panel footer: count · pagination · per-page ----
         footer = QHBoxLayout()
+        footer.setSpacing(8)
+
         self.count_label = QLabel(t("downloads_count", count=0))
         self.count_label.setObjectName("Hint")
-        footer.addWidget(self.count_label, 1)
+        footer.addWidget(self.count_label, 0)
+
+        footer.addStretch(1)
+
+        # Pagination — buttons get rebuilt dynamically by _render_pagination
+        self.pagination_wrap = QWidget()
+        self.pagination_layout = QHBoxLayout(self.pagination_wrap)
+        self.pagination_layout.setContentsMargins(0, 0, 0, 0)
+        self.pagination_layout.setSpacing(4)
+        footer.addWidget(self.pagination_wrap, 0)
+
+        footer.addStretch(1)
+
+        # Per-page dropdown
+        self.per_page_combo = QComboBox()
+        self.per_page_combo.addItem(t("per_page", n=15), 15)
+        self.per_page_combo.addItem(t("per_page", n=30), 30)
+        self.per_page_combo.addItem(t("per_page", n=50), 50)
+        self.per_page_combo.addItem(t("per_page_all"), 0)
+        # restore saved value
+        saved = int(self.cfg.get("per_page", 15) or 0)
+        idx = self.per_page_combo.findData(saved)
+        if idx >= 0:
+            self.per_page_combo.setCurrentIndex(idx)
+        self.per_page_combo.setFixedHeight(32)
+        self.per_page_combo.currentIndexChanged.connect(self._on_per_page_change)
+        footer.addWidget(self.per_page_combo, 0)
+
         panel_layout.addLayout(footer)
 
         root.addWidget(panel, 1)
+
+        # ---- Bottom status bar (version + update indicator) ----
+        self._build_status_bar(root)
 
     # ==================================================================
     # Update banner — built as part of _build_ui
@@ -412,12 +452,16 @@ class App(QMainWindow):
     # ==================================================================
     # Update flow
     # ==================================================================
-    def start_update_check(self):
-        """Called by main.py after the window is shown."""
+    def start_update_check(self, show_status: bool = False):
+        """Run the GitHub release check. `show_status` toggles the bottom-bar
+        'Checking…' indicator (used by the Settings → Check-for-updates
+        action so the user sees feedback even on a fast network)."""
+        if show_status:
+            self._set_update_status("checking")
         self._update_checker = UpdateChecker(self)
         self._update_checker.update_available.connect(self._on_update_available)
-        self._update_checker.check_failed.connect(lambda _msg: None)
-        self._update_checker.no_update.connect(lambda: None)
+        self._update_checker.check_failed.connect(self._on_update_check_failed)
+        self._update_checker.no_update.connect(self._on_no_update)
         self._update_checker.start()
 
     @Slot(str, str, int)
@@ -429,12 +473,20 @@ class App(QMainWindow):
             self.update_label.setText(t("update_available", version=tag))
             self.update_action_btn.setText(t("update_now"))
         else:
-            # source run OR release missing the portable exe → link out instead
             self.update_label.setText(t("update_source_hint", version=tag))
             self.update_action_btn.setText(t("update_open_github"))
         self.update_progress.hide()
         self.update_action_btn.setEnabled(True)
         self.update_banner.show()
+        self._set_update_status("available", tag)
+
+    @Slot()
+    def _on_no_update(self):
+        self._set_update_status("up_to_date")
+
+    @Slot(str)
+    def _on_update_check_failed(self, _msg):
+        self._set_update_status("failed")
 
     @Slot()
     def _on_update_now(self):
@@ -480,6 +532,279 @@ class App(QMainWindow):
         self.update_label.setText(t("update_dl_failed", msg=msg))
         self.update_progress.hide()
         self.update_action_btn.setEnabled(True)
+
+    # ==================================================================
+    # Bottom status bar (version + colored indicator + Update button)
+    # ==================================================================
+    def _build_status_bar(self, root):
+        self.status_bar = QFrame()
+        self.status_bar.setObjectName("BottomStatusBar")
+        self.status_bar.setStyleSheet(
+            "QFrame#BottomStatusBar {"
+            "  background: #0F1011;"
+            "  border: 1px solid #23252A;"
+            "  border-radius: 10px;"
+            "}"
+        )
+        self.status_bar.setFixedHeight(34)
+        lay = QHBoxLayout(self.status_bar)
+        lay.setContentsMargins(12, 0, 12, 0)
+        lay.setSpacing(8)
+
+        self.bar_version_label = QLabel(f"v{APP_VERSION}")
+        self.bar_version_label.setStyleSheet(
+            "color: #D0D6E0; font-size: 11px; font-weight: 600;")
+        lay.addWidget(self.bar_version_label)
+
+        self.bar_dot = QLabel("●")
+        self.bar_dot.setStyleSheet("color: #62666D; font-size: 14px;")
+        lay.addWidget(self.bar_dot)
+
+        self.bar_status_text = QLabel(t("status_unknown"))
+        self.bar_status_text.setStyleSheet("color: #8A8F98; font-size: 11px;")
+        lay.addWidget(self.bar_status_text)
+
+        lay.addStretch(1)
+
+        self.bar_update_btn = QPushButton(t("status_update_button"))
+        self.bar_update_btn.setProperty("role", "primary")
+        self.bar_update_btn.setFixedHeight(26)
+        self.bar_update_btn.setCursor(Qt.PointingHandCursor)
+        self.bar_update_btn.clicked.connect(self._on_update_now)
+        self.bar_update_btn.hide()
+        lay.addWidget(self.bar_update_btn)
+
+        self._update_state = "unknown"  # unknown | checking | up_to_date | available | failed
+        root.addWidget(self.status_bar)
+
+    def _set_update_status(self, state: str, version: str = ""):
+        """state ∈ {unknown, checking, up_to_date, available, failed}"""
+        self._update_state = state
+        if state == "checking":
+            self.bar_dot.setStyleSheet("color: #62666D; font-size: 14px;")
+            self.bar_status_text.setText(t("status_checking"))
+            self.bar_update_btn.hide()
+        elif state == "up_to_date":
+            self.bar_dot.setStyleSheet("color: #27A644; font-size: 14px;")
+            self.bar_status_text.setText(t("status_up_to_date"))
+            self.bar_update_btn.hide()
+        elif state == "available":
+            self.bar_dot.setStyleSheet("color: #F0BF00; font-size: 14px;")
+            self.bar_status_text.setText(
+                t("status_update_available", version=version))
+            self.bar_update_btn.setText(t("status_update_button"))
+            self.bar_update_btn.show()
+        elif state == "failed":
+            self.bar_dot.setStyleSheet("color: #62666D; font-size: 14px;")
+            self.bar_status_text.setText(t("status_check_failed"))
+            self.bar_update_btn.hide()
+        else:
+            self.bar_dot.setStyleSheet("color: #62666D; font-size: 14px;")
+            self.bar_status_text.setText(t("status_unknown"))
+            self.bar_update_btn.hide()
+
+    # ==================================================================
+    # Pagination
+    # ==================================================================
+    def _on_per_page_change(self, _idx):
+        data = self.per_page_combo.currentData()
+        self.page_size = int(data or 0)
+        self.cfg["per_page"] = self.page_size
+        save_config(self.cfg)
+        self.current_page = 1
+        self._refresh_list()
+
+    def _render_pagination(self, total_pages: int):
+        # clear existing children
+        while self.pagination_layout.count():
+            it = self.pagination_layout.takeAt(0)
+            w = it.widget()
+            if w:
+                w.deleteLater()
+        if total_pages <= 1:
+            self.pagination_wrap.setVisible(False)
+            return
+        self.pagination_wrap.setVisible(True)
+
+        def make_btn(text, page=None, active=False, enabled=True):
+            b = QPushButton(text)
+            b.setFixedHeight(28)
+            b.setCursor(Qt.PointingHandCursor)
+            if active:
+                b.setProperty("role", "tabActive")
+            else:
+                b.setProperty("role", "tab")
+            b.setEnabled(enabled)
+            if page is not None and enabled and not active:
+                b.clicked.connect(lambda _=False, p=page: self._goto_page(p))
+            return b
+
+        cur = self.current_page
+        # prev arrow
+        self.pagination_layout.addWidget(
+            make_btn("‹", page=max(1, cur - 1), enabled=cur > 1))
+
+        # window of page numbers with ellipsis
+        def add_page(p):
+            self.pagination_layout.addWidget(
+                make_btn(str(p), page=p, active=(p == cur)))
+
+        def add_dots():
+            lbl = QLabel("…")
+            lbl.setStyleSheet("color: #8A8F98; padding: 0 4px;")
+            self.pagination_layout.addWidget(lbl)
+
+        pages_to_show = set([1, total_pages, cur, cur - 1, cur + 1])
+        pages = sorted(p for p in pages_to_show if 1 <= p <= total_pages)
+        prev = 0
+        for p in pages:
+            if prev and p > prev + 1:
+                add_dots()
+            add_page(p)
+            prev = p
+
+        # next arrow
+        self.pagination_layout.addWidget(
+            make_btn("›", page=min(total_pages, cur + 1),
+                     enabled=cur < total_pages))
+
+    def _goto_page(self, page: int):
+        self.current_page = max(1, page)
+        self._refresh_list()
+
+    # ==================================================================
+    # Live language switch
+    # ==================================================================
+    def set_language(self, code: str):
+        if code not in Translator.AVAILABLE:
+            return
+        if code == Translator.lang():
+            return
+        Translator.load(code)
+        self.cfg["lang"] = code
+        save_config(self.cfg)
+        # flip layout direction live
+        app = QApplication.instance()
+        if app is not None:
+            app.setLayoutDirection(
+                Qt.RightToLeft if Translator.is_rtl() else Qt.LeftToRight)
+        self.retranslate()
+
+    def retranslate(self):
+        """Re-apply every translated string. Called after the active language
+        is swapped (also walks open dialogs + per-row widgets + tray).
+
+        Individual sections are protected so one widget-level failure doesn't
+        block the rest of the tree from updating."""
+        self.setWindowTitle(t("app_title"))
+
+        # Top bar
+        self.url_entry.setPlaceholderText(t("url_placeholder"))
+        self.fetch_btn.setText(t("fetch"))
+        self.settings_btn.setToolTip(t("settings"))
+        self.account_btn.setToolTip(t("account"))
+
+        # Options card
+        self._retranslate_segmented(
+            self.format_btns,
+            {"mp4": t("format_mp4"), "mp3": t("format_mp3")})
+        self.download_btn.setText(t("download"))
+        if self.options_card.isVisible():
+            self.status_label.setText(t("pick_format_hint"))
+
+        # Playlist card
+        self._retranslate_segmented(
+            self.pl_format_btns,
+            {"mp4": t("format_mp4"), "mp3": t("format_mp3")})
+        self.pl_download_btn.setText(t("download_selected"))
+
+        # Tabs
+        self._retranslate_segmented(
+            self.tabs_btns,
+            {"All": t("tab_all"), "Video": t("tab_video"),
+             "Audio": t("tab_audio")})
+
+        # Downloads panel header
+        self.search_entry.setPlaceholderText(t("search_downloads"))
+        self._rebuild_sort_combo()
+        self.clear_btn.setText(t("clear_all"))
+
+        # Empty hint
+        self.empty_label.setText(t("empty_hint"))
+
+        # Footer count + per-page combo
+        self.count_label.setText(
+            t("downloads_count",
+              count=sum(1 for r in self.rows.values() if r.visible)))
+        self._rebuild_per_page_combo()
+
+        # Update banner — re-issue current state's text
+        if self.update_banner.isVisible() and self._update_tag:
+            self._on_update_available(self._update_tag,
+                                      self._update_asset_url,
+                                      self._update_size)
+        self.update_action_btn.setText(
+            t("update_now") if is_frozen() and self._update_asset_url
+            else t("update_open_github"))
+
+        # Bottom status bar
+        self._set_update_status(self._update_state, self._update_tag)
+
+        # Per-row UI
+        for row in self.rows.values():
+            try:
+                row.retranslate()
+            except Exception:
+                pass
+
+        # Tray
+        if self.tray is not None:
+            try:
+                self.tray.retranslate()
+            except Exception:
+                pass
+
+        # Open dialogs (children + parented popups)
+        for dlg in self.findChildren(QDialog):
+            if hasattr(dlg, "retranslate"):
+                try:
+                    dlg.retranslate()
+                except Exception:
+                    pass
+
+        # Re-render list (pagination labels include translated text)
+        self._refresh_list()
+
+    def _retranslate_segmented(self, buttons, key_to_label):
+        for b in buttons:
+            key = b.property("key")
+            if key in key_to_label:
+                b.setText(key_to_label[key])
+
+    def _rebuild_sort_combo(self):
+        current_key = self.sort_combo.currentData() or "Last updated"
+        self.sort_combo.blockSignals(True)
+        self.sort_combo.clear()
+        self.sort_combo.addItem(t("sort_last_updated"), "Last updated")
+        self.sort_combo.addItem(t("sort_title"), "Title")
+        self.sort_combo.addItem(t("sort_size"), "Size")
+        idx = self.sort_combo.findData(current_key)
+        if idx >= 0:
+            self.sort_combo.setCurrentIndex(idx)
+        self.sort_combo.blockSignals(False)
+
+    def _rebuild_per_page_combo(self):
+        current = self.per_page_combo.currentData()
+        self.per_page_combo.blockSignals(True)
+        self.per_page_combo.clear()
+        self.per_page_combo.addItem(t("per_page", n=15), 15)
+        self.per_page_combo.addItem(t("per_page", n=30), 30)
+        self.per_page_combo.addItem(t("per_page", n=50), 50)
+        self.per_page_combo.addItem(t("per_page_all"), 0)
+        idx = self.per_page_combo.findData(current)
+        if idx >= 0:
+            self.per_page_combo.setCurrentIndex(idx)
+        self.per_page_combo.blockSignals(False)
 
     def _make_segmented(self, items, on_change, current):
         """Build a QButtonGroup of tab-styled QPushButtons. `items` is a list
@@ -935,33 +1260,54 @@ class App(QMainWindow):
 
     def _refresh_list(self):
         # collect visible items by current filter
-        visible_items = []
+        filtered = []
         for it in self.items:
             row = self.rows.get(id(it))
             if not row:
                 continue
             if row.matches(self.search_query, self.active_tab):
-                visible_items.append(it)
+                filtered.append(it)
             else:
                 row.setVisibleRow(False)
 
         if self.sort_by == "Title":
-            visible_items.sort(
+            filtered.sort(
                 key=lambda i: (i.custom_filename or i.title or "").lower())
         elif self.sort_by == "Size":
-            visible_items.sort(
+            filtered.sort(
                 key=lambda i: i.size_on_disk or i.size_bytes, reverse=True)
         else:
-            visible_items.sort(key=lambda i: i.last_updated, reverse=True)
+            filtered.sort(key=lambda i: i.last_updated, reverse=True)
 
-        # re-order in layout: remove all rows then add in sorted order
-        # (leave the trailing stretch in place)
-        for it in visible_items:
+        # Pagination: slice to current page.
+        total = len(filtered)
+        if self.page_size > 0:
+            total_pages = max(1, (total + self.page_size - 1) // self.page_size)
+            if self.current_page > total_pages:
+                self.current_page = total_pages
+            start = (self.current_page - 1) * self.page_size
+            end = start + self.page_size
+            page_items = filtered[start:end]
+        else:
+            total_pages = 1
+            self.current_page = 1
+            page_items = filtered
+
+        # Hide rows that are filtered-in but on a different page
+        on_page_ids = {id(it) for it in page_items}
+        for it in filtered:
+            if id(it) not in on_page_ids:
+                row = self.rows.get(id(it))
+                if row:
+                    row.setVisibleRow(False)
+
+        # Reorder visible rows in the layout
+        for it in page_items:
             row = self.rows.get(id(it))
             if not row:
                 continue
             self.list_layout.removeWidget(row)
-        for it in visible_items:
+        for it in page_items:
             row = self.rows.get(id(it))
             if not row:
                 continue
@@ -970,8 +1316,8 @@ class App(QMainWindow):
             row.setVisibleRow(True)
 
         self.empty_label.setVisible(len(self.items) == 0)
-        self.count_label.setText(
-            t("downloads_count", count=len(visible_items)))
+        self.count_label.setText(t("downloads_count", count=total))
+        self._render_pagination(total_pages)
 
     # ==================================================================
     # Persistence

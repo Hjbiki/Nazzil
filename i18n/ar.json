@@ -159,5 +159,25 @@
   "update_ready": "التحديث جاهز — إعادة تشغيل نزّل…",
   "update_source_hint": "تحديث متوفّر: {version} — التشغيل من المصدر. حمّل من GitHub.",
   "update_open_github": "فتح GitHub",
-  "update_dl_failed": "فشل تنزيل التحديث: {msg}"
+  "update_dl_failed": "فشل تنزيل التحديث: {msg}",
+
+  "status_up_to_date": "محدّث",
+  "status_checking": "جاري التحقق من التحديثات…",
+  "status_unknown": "لم يُتحقق",
+  "status_check_failed": "فشل التحقق من التحديث",
+  "status_update_available": "تحديث متوفّر: {version}",
+  "status_update_button": "تحديث",
+  "check_for_updates": "تحقّق من التحديثات",
+
+  "per_page": "{n} / صفحة",
+  "per_page_all": "الكل",
+
+  "about": "حول",
+  "about_title": "حول نزّل",
+  "about_developed_by": "تطوير عناد (Anad)",
+  "about_visit_site": "زيارة الموقع",
+  "about_donate": "ادعمني / Support",
+  "about_powered_by": "مدعوم بـ yt-dlp",
+  "about_version_label": "الإصدار {version}",
+  "close": "إغلاق"
 }

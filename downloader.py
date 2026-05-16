@@ -47,6 +47,10 @@ class DownloadItem(QObject):
         self.title = self.info.get("title") or url
         self.duration = self.info.get("duration") or 0
         self.thumb_url = self.info.get("thumbnail") or ""
+        self.uploader = (self.info.get("uploader")
+                         or self.info.get("channel")
+                         or self.info.get("uploader_id")
+                         or "")
         self.folder = folder
         self.status = status            # queued/downloading/completed/failed/interrupted
         self.filepath = filepath
@@ -280,6 +284,7 @@ class DownloadItem(QObject):
         return {
             "url": self.url,
             "title": self.title,
+            "uploader": self.uploader,
             "fmt": self.fmt,
             "height": self.height,
             "bitrate": self.bitrate,
@@ -300,6 +305,7 @@ class DownloadItem(QObject):
             "title": d.get("title", ""),
             "thumbnail": d.get("thumbnail", ""),
             "duration": d.get("duration", 0),
+            "uploader": d.get("uploader", ""),
         }
         status = d.get("status", "interrupted")
         if status in ("downloading", "queued"):

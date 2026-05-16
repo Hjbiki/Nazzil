@@ -13,8 +13,8 @@ from i18n import t
 def _fallback_icon():
     """Load assets/icon.png if the caller didn't pass an icon."""
     here = os.path.dirname(os.path.abspath(__file__))
-    # assets/ sits next to ui/, so go up one level.
-    candidate = os.path.normpath(os.path.join(here, "..", "assets", "icon.png"))
+    candidate = os.path.normpath(
+        os.path.join(here, "..", "assets", "icon.png"))
     if os.path.exists(candidate):
         return QIcon(candidate)
     return QIcon()
@@ -35,16 +35,15 @@ class Tray(QObject):
         self._icon_obj.setToolTip(t("app_short"))
 
         self._menu = QMenu()
-        act_show = QAction(t("tray_show"), self._menu)
-        act_exit = QAction(t("tray_exit"), self._menu)
-        act_show.triggered.connect(self.show_requested.emit)
-        act_exit.triggered.connect(self.exit_requested.emit)
-        self._menu.addAction(act_show)
+        self._act_show = QAction(t("tray_show"), self._menu)
+        self._act_exit = QAction(t("tray_exit"), self._menu)
+        self._act_show.triggered.connect(self.show_requested.emit)
+        self._act_exit.triggered.connect(self.exit_requested.emit)
+        self._menu.addAction(self._act_show)
         self._menu.addSeparator()
-        self._menu.addAction(act_exit)
+        self._menu.addAction(self._act_exit)
         self._icon_obj.setContextMenu(self._menu)
 
-        # Left-click / double-click on the tray icon → show window
         self._icon_obj.activated.connect(self._on_activated)
 
     def _on_activated(self, reason):
@@ -64,5 +63,16 @@ class Tray(QObject):
         try:
             self._icon_obj.showMessage(
                 title, message, QSystemTrayIcon.Information, msec)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Live language switch
+    # ------------------------------------------------------------------
+    def retranslate(self):
+        try:
+            self._icon_obj.setToolTip(t("app_short"))
+            self._act_show.setText(t("tray_show"))
+            self._act_exit.setText(t("tray_exit"))
         except Exception:
             pass

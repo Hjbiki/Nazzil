@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Qt dialogs: Settings, Account/cookies, Rename, File-conflict,
-Duplicate-video confirm, yt-dlp updater."""
+Duplicate-video confirm, yt-dlp updater, About."""
 
 import os
 import shutil
@@ -8,12 +8,14 @@ import subprocess
 import sys
 import threading
 
-from PySide6.QtCore import QObject, Qt, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog,
-                               QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-                               QMessageBox, QPushButton, QVBoxLayout)
+                               QFileDialog, QFrame, QHBoxLayout, QLabel,
+                               QLineEdit, QMessageBox, QPushButton,
+                               QVBoxLayout)
 
-from config import COOKIE_MODES, save_config
+from config import APP_VERSION, COOKIE_MODES, save_config
 from i18n import Translator, t
 from utils import classify_error, clean_error
 
@@ -26,27 +28,29 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.app = app
         self.setWindowTitle(t("settings_title"))
-        self.setMinimumSize(600, 540)
+        self.setMinimumSize(620, 620)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(12)
 
         # --- folder ---
-        root.addWidget(self._header(t("download_folder")))
+        self.folder_header = self._header(t("download_folder"))
+        root.addWidget(self.folder_header)
         folder_row = QHBoxLayout()
         self.folder_lbl = QLabel(app.folder or t("not_set"))
         self.folder_lbl.setStyleSheet("color: #D0D6E0;")
-        change_btn = QPushButton(t("change"))
-        change_btn.setProperty("role", "primary")
-        change_btn.clicked.connect(self._pick_folder)
+        self.change_btn = QPushButton(t("change"))
+        self.change_btn.setProperty("role", "primary")
+        self.change_btn.clicked.connect(self._pick_folder)
         folder_row.addWidget(self.folder_lbl, 1)
-        folder_row.addWidget(change_btn, 0)
+        folder_row.addWidget(self.change_btn, 0)
         root.addLayout(folder_row)
 
         # --- language ---
         root.addSpacing(8)
-        root.addWidget(self._header(t("language")))
+        self.lang_header = self._header(t("language"))
+        root.addWidget(self.lang_header)
         lang_row = QHBoxLayout()
         self.lang_combo = QComboBox()
         self.lang_combo.addItem("العربية", "ar")
@@ -58,10 +62,10 @@ class SettingsDialog(QDialog):
         lang_row.addWidget(self.lang_combo, 0)
         lang_row.addStretch(1)
         root.addLayout(lang_row)
-        lang_hint = QLabel(t("language_hint"))
-        lang_hint.setObjectName("Hint")
-        lang_hint.setWordWrap(True)
-        root.addWidget(lang_hint)
+        self.lang_hint = QLabel(t("language_hint"))
+        self.lang_hint.setObjectName("Hint")
+        self.lang_hint.setWordWrap(True)
+        root.addWidget(self.lang_hint)
 
         # --- aria2c ---
         root.addSpacing(8)
@@ -91,10 +95,22 @@ class SettingsDialog(QDialog):
         self.tray_chk.toggled.connect(self._on_tray_toggle)
         root.addWidget(self.tray_chk)
 
-        # --- yt-dlp updater ---
+        # --- check for updates (Nazzil itself) ---
         root.addSpacing(12)
+        chk_row = QHBoxLayout()
+        self.app_update_header = self._header(t("app_short"))
+        chk_row.addWidget(self.app_update_header)
+        chk_row.addStretch(1)
+        self.check_updates_btn = QPushButton(t("check_for_updates"))
+        self.check_updates_btn.clicked.connect(self._check_app_updates)
+        chk_row.addWidget(self.check_updates_btn)
+        root.addLayout(chk_row)
+
+        # --- yt-dlp updater ---
+        root.addSpacing(8)
         upd_row = QHBoxLayout()
-        upd_row.addWidget(self._header("yt-dlp"))
+        self.ytdlp_header = self._header("yt-dlp")
+        upd_row.addWidget(self.ytdlp_header)
         upd_row.addStretch(1)
         self.update_btn = QPushButton(t("update_ytdlp"))
         self.update_btn.clicked.connect(self._do_update)
@@ -107,9 +123,16 @@ class SettingsDialog(QDialog):
 
         root.addStretch(1)
 
-        ctrl = QLabel(t("config_saved_at"))
-        ctrl.setObjectName("Hint")
-        root.addWidget(ctrl)
+        # --- footer: About + config-saved hint ---
+        footer = QHBoxLayout()
+        self.about_btn = QPushButton(t("about"))
+        self.about_btn.clicked.connect(self._open_about)
+        footer.addWidget(self.about_btn)
+        footer.addStretch(1)
+        self.cfg_hint = QLabel(t("config_saved_at"))
+        self.cfg_hint.setObjectName("Hint")
+        footer.addWidget(self.cfg_hint)
+        root.addLayout(footer)
 
     def _header(self, text):
         l = QLabel(text)
@@ -126,8 +149,10 @@ class SettingsDialog(QDialog):
 
     def _on_lang_change(self, _idx):
         code = self.lang_combo.currentData()
-        self.app.cfg["lang"] = code
-        save_config(self.app.cfg)
+        # Persist + delegate the live flip to App, which retranslates the
+        # whole UI tree (including this dialog).
+        if hasattr(self.app, "set_language"):
+            self.app.set_language(code)
 
     def _on_aria_toggle(self, val):
         self.app.cfg["use_aria2c"] = bool(val)
@@ -151,6 +176,13 @@ class SettingsDialog(QDialog):
         self.app.cfg["minimize_to_tray"] = bool(val)
         save_config(self.app.cfg)
 
+    def _check_app_updates(self):
+        if hasattr(self.app, "start_update_check"):
+            self.app.start_update_check(show_status=True)
+
+    def _open_about(self):
+        AboutDialog(self).exec()
+
     # --- yt-dlp update (runs in a thread, reports via Signal) ---
     def _do_update(self):
         self.update_btn.setEnabled(False)
@@ -162,10 +194,33 @@ class SettingsDialog(QDialog):
 
     @Slot(str, str)
     def _on_update_done(self, msg, level):
-        # level: "ok" | "err" | "muted"
         self.update_btn.setEnabled(True)
         self.update_btn.setText(t("update_ytdlp"))
         self.update_status.setText(msg)
+
+    # ------------------------------------------------------------------
+    # Live language switch
+    # ------------------------------------------------------------------
+    def retranslate(self):
+        try:
+            self.setWindowTitle(t("settings_title"))
+            self.folder_header.setText(t("download_folder"))
+            self.change_btn.setText(t("change"))
+            if not self.app.folder:
+                self.folder_lbl.setText(t("not_set"))
+            self.lang_header.setText(t("language"))
+            self.lang_hint.setText(t("language_hint"))
+            self.aria_chk.setText(t("use_aria2c"))
+            self._refresh_aria_hint()
+            self.clip_chk.setText(t("clipboard_watch"))
+            self.tray_chk.setText(t("minimize_to_tray"))
+            self.app_update_header.setText(t("app_short"))
+            self.check_updates_btn.setText(t("check_for_updates"))
+            self.update_btn.setText(t("update_ytdlp"))
+            self.about_btn.setText(t("about"))
+            self.cfg_hint.setText(t("config_saved_at"))
+        except Exception:
+            pass
 
 
 class _UpdaterWorker(QObject):
@@ -210,10 +265,10 @@ class AccountDialog(QDialog):
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(10)
 
-        header = QLabel(t("account_source"))
-        header.setObjectName("SectionHeader")
-        header.setWordWrap(True)
-        root.addWidget(header)
+        self.header = QLabel(t("account_source"))
+        self.header.setObjectName("SectionHeader")
+        self.header.setWordWrap(True)
+        root.addWidget(self.header)
 
         src_row = QHBoxLayout()
         self.combo = QComboBox()
@@ -303,6 +358,31 @@ class AccountDialog(QDialog):
         self.test_btn.setEnabled(True)
         self.test_btn.setText(t("test_login"))
         self.test_result.setText(msg)
+
+    # ------------------------------------------------------------------
+    # Live language switch
+    # ------------------------------------------------------------------
+    def retranslate(self):
+        try:
+            self.setWindowTitle(t("account_title"))
+            self.header.setText(t("account_source"))
+            self.test_btn.setText(t("test_login"))
+            self.pick_btn.setText(t("pick_file"))
+            if not self.app.cookie_file:
+                self.file_lbl.setText(t("no_file_selected"))
+            # rebuild combo items (preserve current data key)
+            current_key = self.combo.currentData()
+            self.combo.blockSignals(True)
+            self.combo.clear()
+            for key, label_key in COOKIE_MODES:
+                self.combo.addItem(t(label_key), key)
+            idx = self.combo.findData(current_key)
+            if idx >= 0:
+                self.combo.setCurrentIndex(idx)
+            self.combo.blockSignals(False)
+            self._refresh()
+        except Exception:
+            pass
 
 
 class _LoginTester(QObject):
@@ -461,3 +541,93 @@ def duplicate_dialog(parent, video_title):
     box.setDefaultButton(no_btn)
     box.exec()
     return box.clickedButton() is yes_btn
+
+
+# ---------------------------------------------------------------------------
+# About — app name, credits, links, donation button
+# ---------------------------------------------------------------------------
+WEBSITE_URL  = "https://creators.sa/hibiki"
+DONATION_URL = "https://tip.dokan.sa/hibiki"
+
+
+class AboutDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(t("about_title"))
+        self.setMinimumSize(460, 360)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 22, 22, 18)
+        root.setSpacing(10)
+
+        # App name (bilingual line) — large
+        self.name_label = QLabel("Nazzil — نزّل")
+        self.name_label.setStyleSheet(
+            "font-size: 20px; font-weight: 700; color: #F7F8F8;")
+        self.name_label.setAlignment(Qt.AlignCenter)
+        root.addWidget(self.name_label)
+
+        self.version_label = QLabel(t("about_version_label", version=APP_VERSION))
+        self.version_label.setObjectName("Hint")
+        self.version_label.setAlignment(Qt.AlignCenter)
+        root.addWidget(self.version_label)
+
+        # divider line
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet("color: #23252A; background: #23252A;")
+        line.setFixedHeight(1)
+        root.addSpacing(4)
+        root.addWidget(line)
+        root.addSpacing(4)
+
+        # developer
+        self.dev_label = QLabel(t("about_developed_by"))
+        self.dev_label.setStyleSheet("color: #D0D6E0; font-size: 13px;")
+        self.dev_label.setAlignment(Qt.AlignCenter)
+        root.addWidget(self.dev_label)
+
+        # website link
+        self.site_btn = QPushButton(t("about_visit_site"))
+        self.site_btn.setCursor(Qt.PointingHandCursor)
+        self.site_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(WEBSITE_URL)))
+        root.addWidget(self.site_btn, alignment=Qt.AlignCenter)
+
+        # donation button (primary, accent)
+        self.donate_btn = QPushButton(t("about_donate"))
+        self.donate_btn.setProperty("role", "primary")
+        self.donate_btn.setCursor(Qt.PointingHandCursor)
+        self.donate_btn.setMinimumHeight(40)
+        self.donate_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(DONATION_URL)))
+        root.addSpacing(6)
+        root.addWidget(self.donate_btn, alignment=Qt.AlignCenter)
+
+        root.addStretch(1)
+
+        self.powered_label = QLabel(t("about_powered_by"))
+        self.powered_label.setObjectName("Hint")
+        self.powered_label.setAlignment(Qt.AlignCenter)
+        root.addWidget(self.powered_label)
+
+        # close
+        self.close_btn = QPushButton(t("close"))
+        self.close_btn.clicked.connect(self.accept)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(self.close_btn)
+        root.addLayout(btn_row)
+
+    def retranslate(self):
+        try:
+            self.setWindowTitle(t("about_title"))
+            self.version_label.setText(
+                t("about_version_label", version=APP_VERSION))
+            self.dev_label.setText(t("about_developed_by"))
+            self.site_btn.setText(t("about_visit_site"))
+            self.donate_btn.setText(t("about_donate"))
+            self.powered_label.setText(t("about_powered_by"))
+            self.close_btn.setText(t("close"))
+        except Exception:
+            pass
