@@ -146,6 +146,50 @@ class DownloadItem(QObject):
             pass
 
     # ------------------------------------------------------------------
+    # Path resolution after download (size_on_disk source of truth)
+    # ------------------------------------------------------------------
+    def _resolve_final_path(self, info):
+        """Find the actual merged/post-processed file on disk after
+        extract_info(download=True) returns.
+
+        Sources, in priority order:
+          1. info['requested_downloads'][-1]['filepath'] — yt-dlp's
+             canonical list of FINAL outputs after all PPs (Merger,
+             ExtractAudio, EmbedThumbnail, FFmpegMetadata) finished.
+          2. info['filepath'] / info['_filename'] — set when there's
+             no PP chain (single-stream download).
+          3. self.filepath — captured by our hooks during the download.
+          4. self.expected_filename() — predicted from title + ext.
+          5. self._find_output_file() — last-ditch folder scan.
+
+        Returns a verified existing path, or "" if none found."""
+        candidates = []
+        if isinstance(info, dict):
+            reqs = info.get("requested_downloads") or []
+            # Walk in reverse so the LAST PP's output (the final file) wins.
+            for req in reversed(reqs):
+                fp = req.get("filepath") or req.get("_filename")
+                if fp:
+                    candidates.append(fp)
+            for key in ("filepath", "_filename"):
+                fp = info.get(key)
+                if fp:
+                    candidates.append(fp)
+        if self.filepath:
+            candidates.append(self.filepath)
+        candidates.append(self.expected_filename())
+
+        for fp in candidates:
+            if fp and os.path.exists(fp) and os.path.isfile(fp):
+                return fp
+
+        # Final fallback — scan folder for the most-recent matching file.
+        scanned = self._find_output_file()
+        if scanned and os.path.exists(scanned):
+            return scanned
+        return ""
+
+    # ------------------------------------------------------------------
     # Worker
     # ------------------------------------------------------------------
     def _run(self):
@@ -207,22 +251,21 @@ class DownloadItem(QObject):
         try:
             while True:
                 try:
+                    # Use extract_info(download=True) — unlike download(),
+                    # this RETURNS the populated info dict containing
+                    # `requested_downloads`, which lists every final
+                    # on-disk file path after all post-processors ran.
                     with yt_dlp.YoutubeDL(build_opts()) as ydl:
-                        ydl.download([self.url])
+                        info = ydl.extract_info(self.url, download=True)
                     self.status = "completed"
+
                     # ---- Resolve the actual on-disk output file ----
-                    # Reported `size_bytes` from the progress hook is the
-                    # size of a single stream (video OR audio), not the
-                    # merged output. Read the real file size now.
-                    if not (self.filepath and os.path.exists(self.filepath)):
-                        # try the predicted name first, then a folder scan
-                        expected = self.expected_filename()
-                        if os.path.exists(expected):
-                            self.filepath = expected
-                        else:
-                            found = self._find_output_file()
-                            if found:
-                                self.filepath = found
+                    # The progress hook's `total_bytes` is the size of ONE
+                    # stream (audio or video, never the merged result),
+                    # so we MUST read the real file size from disk.
+                    final_fp = self._resolve_final_path(info)
+                    if final_fp:
+                        self.filepath = final_fp
                     if self.filepath and os.path.exists(self.filepath):
                         self.size_on_disk = file_size(self.filepath)
                     self.state_changed.emit()

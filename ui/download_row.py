@@ -208,9 +208,16 @@ class DownloadRow(QFrame):
         status = self.item.status
         if status == "completed":
             self.bar.setValue(1000)
-            size_to_show = self.item.size_on_disk or self.item.size_bytes
-            text = (t("row_completed", size=human_size(size_to_show))
-                    if size_to_show else t("row_completed_no_size"))
+            # ONLY show the size if we actually read it off disk.
+            # `size_bytes` from the progress hook is a single stream's
+            # total (audio OR video, never the merge) — showing it on
+            # the completed row was the root of the "7 MB but file is
+            # 200 MB" bug.
+            if self.item.size_on_disk:
+                text = t("row_completed",
+                         size=human_size(self.item.size_on_disk))
+            else:
+                text = t("row_completed_no_size")
             self._set_meta(text, "ok")
             self.meta_label.setToolTip("")
         elif status == "failed":

@@ -88,6 +88,7 @@ def _http_headers():
 
 
 def _api_get(url: str, timeout: int = 10) -> dict:
+    """GET a GitHub API endpoint with a 10 s timeout + UA + optional token."""
     req = urllib.request.Request(url, headers=_http_headers())
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.load(r)
@@ -131,9 +132,9 @@ class UpdateChecker(QObject):
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
         try:
-            url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-            data = _api_get(url)
+            data = _api_get(url, timeout=10)
             tag = data.get("tag_name", "")
             if not tag or not is_newer(tag, APP_VERSION):
                 self.no_update.emit()
@@ -141,8 +142,16 @@ class UpdateChecker(QObject):
             asset_url, size, _name = find_exe_asset(data)
             self.update_available.emit(tag, asset_url or "", size)
         except urllib.error.HTTPError as e:
+            # 403 = rate-limit, 404 = bad repo/no releases yet
+            print(f"[updater] HTTP {e.code} from {url}: {e.reason}",
+                  file=sys.stderr)
             self.check_failed.emit(f"HTTP {e.code}")
+        except urllib.error.URLError as e:
+            # DNS / connection refused / timeout
+            print(f"[updater] network error: {e.reason}", file=sys.stderr)
+            self.check_failed.emit(str(e.reason)[:120])
         except Exception as e:
+            print(f"[updater] check failed: {e!r}", file=sys.stderr)
             self.check_failed.emit(str(e)[:120])
 
 

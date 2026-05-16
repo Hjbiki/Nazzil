@@ -8,6 +8,7 @@ Version is read from the VERSION file (single source of truth — same file
 that config.py and installer.iss read).
 """
 
+import glob
 import os
 
 block_cipher = None
@@ -21,18 +22,30 @@ except NameError:
 with open(os.path.join(_here, "VERSION"), "r", encoding="utf-8") as _vf:
     APP_VERSION = _vf.read().strip()
 
+# ---- Build the datas list ----
+_datas = [
+    ('VERSION',         '.'),       # bundled at the root of _MEIPASS
+    ('assets/icon.png', 'assets'),
+    ('assets/icon.ico', 'assets'),
+    ('i18n/ar.json',    'i18n'),
+    ('i18n/en.json',    'i18n'),
+]
+
+# Bundle every .ttf / .otf dropped into assets/fonts/ so the custom
+# ThmanyahSans face is available in the frozen build. The folder is
+# created at dev-time; if it's empty we just skip the entries.
+_fonts_dir = os.path.join(_here, "assets", "fonts")
+if os.path.isdir(_fonts_dir):
+    for _font in (glob.glob(os.path.join(_fonts_dir, "*.ttf"))
+                  + glob.glob(os.path.join(_fonts_dir, "*.otf"))):
+        _datas.append((_font, os.path.join("assets", "fonts")))
+
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
     binaries=[],
-    datas=[
-        ('VERSION',         '.'),       # bundled at the root of _MEIPASS
-        ('assets/icon.png', 'assets'),
-        ('assets/icon.ico', 'assets'),
-        ('i18n/ar.json',    'i18n'),
-        ('i18n/en.json',    'i18n'),
-    ],
+    datas=_datas,
     hiddenimports=[
         'yt_dlp',
         'yt_dlp.extractor',

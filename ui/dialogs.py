@@ -598,7 +598,6 @@ class AboutDialog(QDialog):
         self.donate_btn = QPushButton(t("about_donate"))
         self.donate_btn.setProperty("role", "primary")
         self.donate_btn.setCursor(Qt.PointingHandCursor)
-        self.donate_btn.setMinimumHeight(40)
         self.donate_btn.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(DONATION_URL)))
         root.addSpacing(6)

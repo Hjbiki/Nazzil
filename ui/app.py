@@ -159,7 +159,6 @@ class App(QMainWindow):
         pill_layout.addWidget(self.url_entry, 1)
         self.fetch_btn = QPushButton(t("fetch"))
         self.fetch_btn.setProperty("role", "primary")
-        self.fetch_btn.setFixedHeight(32)
         self.fetch_btn.clicked.connect(self._fetch)
         pill_layout.addWidget(self.fetch_btn)
         top.addWidget(self.url_pill, 1)
@@ -214,13 +213,11 @@ class App(QMainWindow):
         for b in self.format_btns:
             ctrl.addWidget(b)
         self.quality_combo = QComboBox()
-        self.quality_combo.setFixedHeight(36)
         self.quality_combo.addItem("—")
         ctrl.addWidget(self.quality_combo)
         ctrl.addStretch(1)
         self.download_btn = QPushButton(t("download"))
         self.download_btn.setProperty("role", "primary")
-        self.download_btn.setFixedHeight(40)
         self.download_btn.clicked.connect(self._add_download)
         ctrl.addWidget(self.download_btn)
         oc.addLayout(ctrl)
@@ -275,7 +272,6 @@ class App(QMainWindow):
         for b in self.pl_format_btns:
             pl_controls.addWidget(b)
         self.pl_quality_combo = QComboBox()
-        self.pl_quality_combo.setFixedHeight(36)
         self.pl_quality_combo.addItems(
             ["2160p (4K)", "1440p (2K)", "1080p", "720p", "480p", "360p"])
         self.pl_quality_combo.setCurrentText("1080p")
@@ -283,7 +279,6 @@ class App(QMainWindow):
         pl_controls.addStretch(1)
         self.pl_download_btn = QPushButton(t("download_selected"))
         self.pl_download_btn.setProperty("role", "primary")
-        self.pl_download_btn.setFixedHeight(40)
         self.pl_download_btn.clicked.connect(self._add_playlist_downloads)
         pl_controls.addWidget(self.pl_download_btn)
         pc.addLayout(pl_controls)
@@ -331,7 +326,6 @@ class App(QMainWindow):
         self.sort_combo.addItem(t("sort_last_updated"), "Last updated")
         self.sort_combo.addItem(t("sort_title"), "Title")
         self.sort_combo.addItem(t("sort_size"), "Size")
-        self.sort_combo.setFixedHeight(36)
         self.sort_combo.currentIndexChanged.connect(self._on_sort)
         header.addWidget(self.sort_combo)
 
@@ -390,7 +384,6 @@ class App(QMainWindow):
         idx = self.per_page_combo.findData(saved)
         if idx >= 0:
             self.per_page_combo.setCurrentIndex(idx)
-        self.per_page_combo.setFixedHeight(32)
         self.per_page_combo.currentIndexChanged.connect(self._on_per_page_change)
         footer.addWidget(self.per_page_combo, 0)
 
@@ -453,9 +446,12 @@ class App(QMainWindow):
     # Update flow
     # ==================================================================
     def start_update_check(self, show_status: bool = False):
-        """Run the GitHub release check. `show_status` toggles the bottom-bar
-        'Checking…' indicator (used by the Settings → Check-for-updates
-        action so the user sees feedback even on a fast network)."""
+        """Run the GitHub release check. `show_status=True` means the user
+        manually clicked Check-for-updates — we surface progress AND any
+        failure in the status bar. `show_status=False` is the silent
+        startup auto-check: success updates the dot, failure leaves it
+        gray (only the stderr log records what went wrong)."""
+        self._update_check_manual = bool(show_status)
         if show_status:
             self._set_update_status("checking")
         self._update_checker = UpdateChecker(self)
@@ -486,7 +482,14 @@ class App(QMainWindow):
 
     @Slot(str)
     def _on_update_check_failed(self, _msg):
-        self._set_update_status("failed")
+        # Only display the failure if the user explicitly asked. Auto-checks
+        # fail silently — we leave the dot gray ("unknown") so transient
+        # network hiccups don't spook the user. The real error already
+        # went to stderr from UpdateChecker.
+        if getattr(self, "_update_check_manual", False):
+            self._set_update_status("failed")
+        else:
+            self._set_update_status("unknown")
 
     @Slot()
     def _on_update_now(self):
@@ -546,7 +549,7 @@ class App(QMainWindow):
             "  border-radius: 10px;"
             "}"
         )
-        self.status_bar.setFixedHeight(34)
+        self.status_bar.setFixedHeight(48)  # tall enough for primary btn + descenders
         lay = QHBoxLayout(self.status_bar)
         lay.setContentsMargins(12, 0, 12, 0)
         lay.setSpacing(8)
@@ -568,7 +571,6 @@ class App(QMainWindow):
 
         self.bar_update_btn = QPushButton(t("status_update_button"))
         self.bar_update_btn.setProperty("role", "primary")
-        self.bar_update_btn.setFixedHeight(26)
         self.bar_update_btn.setCursor(Qt.PointingHandCursor)
         self.bar_update_btn.clicked.connect(self._on_update_now)
         self.bar_update_btn.hide()
@@ -628,7 +630,6 @@ class App(QMainWindow):
 
         def make_btn(text, page=None, active=False, enabled=True):
             b = QPushButton(text)
-            b.setFixedHeight(28)
             b.setCursor(Qt.PointingHandCursor)
             if active:
                 b.setProperty("role", "tabActive")

@@ -28,6 +28,7 @@ except ImportError:
     sys.exit(1)
 
 from config import DEFAULT_LANG, load_config   # noqa: E402
+from fonts import load_app_fonts               # noqa: E402
 from i18n import Translator                    # noqa: E402
 from ui.app import App                         # noqa: E402
 from ui.theme import THEME_QSS                 # noqa: E402
@@ -57,6 +58,11 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Nazzil")
     app.setQuitOnLastWindowClosed(False)  # closing the window → minimize to tray
+
+    # Register bundled fonts BEFORE the stylesheet is applied so the QSS
+    # `font-family: "Thmanyah Sans"` selector resolves against the family
+    # we just registered.
+    load_app_fonts(app)
 
     # Load language from config (default Arabic) BEFORE building UI.
     cfg = load_config()

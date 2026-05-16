@@ -56,14 +56,14 @@ THEME_QSS = f"""
 /* ===========================================================
    Base
    ===========================================================
-   Font stack: Segoe UI renders Arabic OK on Windows 10/11, but Tahoma and
-   Noto Sans Arabic both have better descender metrics — list them first
-   so Qt picks them for Arabic glyphs while keeping Segoe UI for Latin.
-   ج ح ت ي have descenders; lining height must leave room for them. */
+   Primary family: Thmanyah Sans (registered at startup from
+   assets/fonts/). Fallbacks cover both Latin and Arabic if the bundled
+   font is missing — Tahoma & Noto Sans Arabic have good descender
+   metrics so ج ح ت ي don't get clipped. */
 QWidget {{
     background: {APP_BG};
     color: {TEXT};
-    font-family: "Segoe UI", "Tahoma", "Noto Sans Arabic", "Helvetica Neue", Arial, sans-serif;
+    font-family: "Thmanyah Sans", "Segoe UI", "Tahoma", "Noto Sans Arabic", "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
 }}
 
@@ -167,14 +167,16 @@ QLineEdit#SearchEntry {{
 /* ===========================================================
    Buttons
    ===========================================================
-   Extra vertical padding + min-height so Arabic descenders
-   (ج ح ت ي) don't get clipped at the baseline. */
+   Sizing rule: don't pin a fixed height in Python. Use QSS min-height
+   + generous horizontal padding so Arabic glyphs (which run ~10-15%
+   wider than Latin) get the room they need without clipping. Bold
+   weight comes from the Thmanyah Sans family. */
 QPushButton {{
     background: {INPUT_BG};
     border: 1px solid {INPUT_BORDER};
     border-radius: 18px;
-    padding: 8px 16px 10px 16px;
-    min-height: 22px;
+    padding: 6px 18px 8px 18px;
+    min-height: 24px;
     color: {TEXT};
     font-weight: 600;
 }}
@@ -186,9 +188,10 @@ QPushButton[role="primary"] {{
     background: {ACCENT};
     border: 1px solid {ACCENT};
     color: white;
-    padding: 9px 20px 11px 20px;
+    padding: 7px 22px 9px 22px;
     min-height: 24px;
-    border-radius: 22px;
+    border-radius: 20px;
+    font-weight: 700;
 }}
 QPushButton[role="primary"]:hover {{ background: {ACCENT_HOV}; border-color: {ACCENT_HOV}; }}
 QPushButton[role="primary"]:pressed {{ background: {ACCENT}; }}
@@ -248,7 +251,7 @@ QPushButton[role="tab"] {{
     border: 1px solid {INPUT_BORDER};
     color: {TEXT};
     border-radius: 10px;
-    padding: 8px 18px 10px 18px;
+    padding: 6px 20px 8px 20px;
     min-height: 22px;
 }}
 QPushButton[role="tab"]:hover {{ background: {SEC_HOVER}; }}
@@ -257,7 +260,7 @@ QPushButton[role="tabActive"] {{
     border: 1px solid {ACCENT_TINT_BORDER};
     color: {TEXT};
     border-radius: 10px;
-    padding: 8px 18px 10px 18px;
+    padding: 6px 20px 8px 20px;
     min-height: 22px;
     font-weight: 700;
 }}

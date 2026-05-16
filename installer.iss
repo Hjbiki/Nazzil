@@ -5,7 +5,7 @@
 ; Version is read DYNAMICALLY from the VERSION file (single source of truth).
 
 #define AppName       "Nazzil"
-#define AppPublisher  "Hjbiki"
+#define AppPublisher  "Anad Askar"
 #define AppExeName    "Nazzil.exe"
 
 ; --- Read version from VERSION file -----------------------------------------
