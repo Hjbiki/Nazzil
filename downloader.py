@@ -6,6 +6,8 @@ import os
 import re
 import shutil
 import threading
+from datetime import datetime
+from urllib.parse import urlparse
 
 from PySide6.QtCore import QObject, Signal
 import yt_dlp
@@ -13,6 +15,19 @@ import yt_dlp
 from i18n import t
 from utils import (clean_error, classify_error, file_size,
                    sanitize_filename)
+
+
+def _domain_from_url(url):
+    """Return the bare hostname (no `www.`) or "" if unparseable."""
+    if not url:
+        return ""
+    try:
+        netloc = urlparse(url).netloc or ""
+    except Exception:
+        return ""
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    return netloc.lower()
 
 
 class CancelledDownload(Exception):
@@ -37,7 +52,8 @@ class DownloadItem(QObject):
     def __init__(self, url, fmt, height, info, folder, *,
                  bitrate=192, status="queued", filepath="",
                  error_msg="", size_bytes=0, size_on_disk=0,
-                 custom_filename=None, parent=None):
+                 custom_filename=None, added_at=None,
+                 extractor=None, webpage_url_domain=None, parent=None):
         super().__init__(parent)
         self.url = url
         self.fmt = fmt                  # "mp4" or "mp3"
@@ -58,6 +74,25 @@ class DownloadItem(QObject):
         self.size_bytes = size_bytes
         self.size_on_disk = size_on_disk
         self.custom_filename = custom_filename
+
+        # ---- Source-tag inputs ----
+        # `extractor` arrives from yt-dlp's info dict (e.g. "youtube",
+        # "vimeo", "twitter", "generic"). If callers pass it explicitly
+        # (from_dict, playlist add path), honour that. Otherwise pull
+        # from info.
+        if extractor is None:
+            extractor = self.info.get("extractor") or ""
+        self.extractor = (extractor or "").lower()
+        if webpage_url_domain is None:
+            page_url = (self.info.get("webpage_url")
+                        or self.info.get("original_url")
+                        or url)
+            webpage_url_domain = _domain_from_url(page_url)
+        self.webpage_url_domain = webpage_url_domain or ""
+
+        # ISO timestamp at row creation. Stable across restarts so
+        # "Date added" sort matches the order rows entered the session.
+        self.added_at = added_at or datetime.now().isoformat()
 
         self.last_updated = 0
         self.cancelled = False
@@ -259,6 +294,22 @@ class DownloadItem(QObject):
                         info = ydl.extract_info(self.url, download=True)
                     self.status = "completed"
 
+                    # ---- Refresh source-tag fields from the live info ----
+                    # Playlist entries built via `extract_flat` arrive without
+                    # `extractor`, so wait until we actually download to fill
+                    # them in. The user-visible source pill renders from
+                    # whatever's set here.
+                    live_extractor = (info.get("extractor") or "").lower() \
+                        if isinstance(info, dict) else ""
+                    if live_extractor:
+                        self.extractor = live_extractor
+                    live_page = (info.get("webpage_url")
+                                 or info.get("original_url")
+                                 or self.url) if isinstance(info, dict) else self.url
+                    live_domain = _domain_from_url(live_page)
+                    if live_domain:
+                        self.webpage_url_domain = live_domain
+
                     # ---- Resolve the actual on-disk output file ----
                     # The progress hook's `total_bytes` is the size of ONE
                     # stream (audio or video, never the merged result),
@@ -397,6 +448,9 @@ class DownloadItem(QObject):
             "size_bytes": self.size_bytes,
             "size_on_disk": self.size_on_disk,
             "custom_filename": self.custom_filename,
+            "added_at": self.added_at,
+            "extractor": self.extractor,
+            "webpage_url_domain": self.webpage_url_domain,
         }
 
     @classmethod
@@ -410,6 +464,15 @@ class DownloadItem(QObject):
         status = d.get("status", "interrupted")
         if status in ("downloading", "queued"):
             status = "interrupted"
+        # Back-compat: old sessions stored no extractor. Their rows are
+        # almost certainly YouTube (everything pre-1.4 was YouTube-only),
+        # so assume that rather than rendering a blank tag.
+        extractor = d.get("extractor")
+        if extractor is None:
+            extractor = "youtube"
+        domain = d.get("webpage_url_domain")
+        if domain is None:
+            domain = _domain_from_url(d.get("url", ""))
         return cls(
             url=d.get("url", ""),
             fmt=d.get("fmt", "mp4"),
@@ -423,4 +486,7 @@ class DownloadItem(QObject):
             size_on_disk=d.get("size_on_disk", 0),
             bitrate=d.get("bitrate", 192),
             custom_filename=d.get("custom_filename"),
+            added_at=d.get("added_at"),
+            extractor=extractor,
+            webpage_url_domain=domain,
         )

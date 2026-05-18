@@ -13,25 +13,26 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog,
                                QFileDialog, QFrame, QHBoxLayout, QLabel,
                                QLineEdit, QMessageBox, QPushButton,
-                               QVBoxLayout)
+                               QRadioButton, QVBoxLayout, QWidget)
 
 from config import APP_VERSION, COOKIE_MODES, save_config
 from i18n import Translator, t
+from ui.icons import icon as _icon
+from ui.window_chrome import FramelessDialog
 from utils import classify_error, clean_error
 
 
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
-class SettingsDialog(QDialog):
+class SettingsDialog(FramelessDialog):
     def __init__(self, app, parent=None):
-        super().__init__(parent)
+        super().__init__(title=t("settings_title"), parent=parent)
         self.app = app
-        self.setWindowTitle(t("settings_title"))
-        self.setMinimumSize(620, 620)
+        self.setMinimumSize(620, 640)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 18)
+        root = QVBoxLayout(self.body)
+        root.setContentsMargins(20, 16, 20, 20)
         root.setSpacing(12)
 
         # --- folder ---
@@ -62,16 +63,14 @@ class SettingsDialog(QDialog):
         lang_row.addWidget(self.lang_combo, 0)
         lang_row.addStretch(1)
         root.addLayout(lang_row)
-        self.lang_hint = QLabel(t("language_hint"))
-        self.lang_hint.setObjectName("Hint")
-        self.lang_hint.setWordWrap(True)
-        root.addWidget(self.lang_hint)
+        # No restart hint — language switches live (no app restart needed).
 
         # --- aria2c ---
         root.addSpacing(8)
         self.aria_chk = QCheckBox(t("use_aria2c"))
         self.aria_chk.setProperty("role", "switch")
         self.aria_chk.setChecked(bool(app.cfg.get("use_aria2c", False)))
+        self.aria_chk.setStyleSheet("QCheckBox { spacing: 12px; }")
         self.aria_chk.toggled.connect(self._on_aria_toggle)
         root.addWidget(self.aria_chk)
         self.aria_hint = QLabel()
@@ -85,6 +84,7 @@ class SettingsDialog(QDialog):
         self.clip_chk = QCheckBox(t("clipboard_watch"))
         self.clip_chk.setProperty("role", "switch")
         self.clip_chk.setChecked(bool(app.cfg.get("clipboard_watch", True)))
+        self.clip_chk.setStyleSheet("QCheckBox { spacing: 12px; }")
         self.clip_chk.toggled.connect(self._on_clip_toggle)
         root.addWidget(self.clip_chk)
 
@@ -92,6 +92,7 @@ class SettingsDialog(QDialog):
         self.tray_chk = QCheckBox(t("minimize_to_tray"))
         self.tray_chk.setProperty("role", "switch")
         self.tray_chk.setChecked(bool(app.cfg.get("minimize_to_tray", True)))
+        self.tray_chk.setStyleSheet("QCheckBox { spacing: 12px; }")
         self.tray_chk.toggled.connect(self._on_tray_toggle)
         root.addWidget(self.tray_chk)
 
@@ -204,12 +205,12 @@ class SettingsDialog(QDialog):
     def retranslate(self):
         try:
             self.setWindowTitle(t("settings_title"))
+            self.set_title(t("settings_title"))
             self.folder_header.setText(t("download_folder"))
             self.change_btn.setText(t("change"))
             if not self.app.folder:
                 self.folder_lbl.setText(t("not_set"))
             self.lang_header.setText(t("language"))
-            self.lang_hint.setText(t("language_hint"))
             self.aria_chk.setText(t("use_aria2c"))
             self._refresh_aria_hint()
             self.clip_chk.setText(t("clipboard_watch"))
@@ -254,15 +255,14 @@ class _UpdaterWorker(QObject):
 # ---------------------------------------------------------------------------
 # Account / cookies
 # ---------------------------------------------------------------------------
-class AccountDialog(QDialog):
+class AccountDialog(FramelessDialog):
     def __init__(self, app, parent=None):
-        super().__init__(parent)
+        super().__init__(title=t("account_title"), parent=parent)
         self.app = app
-        self.setWindowTitle(t("account_title"))
-        self.setMinimumSize(580, 380)
+        self.setMinimumSize(560, 440)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 18)
+        root = QVBoxLayout(self.body)
+        root.setContentsMargins(20, 16, 20, 20)
         root.setSpacing(10)
 
         self.header = QLabel(t("account_source"))
@@ -270,22 +270,77 @@ class AccountDialog(QDialog):
         self.header.setWordWrap(True)
         root.addWidget(self.header)
 
-        src_row = QHBoxLayout()
-        self.combo = QComboBox()
-        for key, label_key in COOKIE_MODES:
-            self.combo.addItem(t(label_key), key)
-        idx = self.combo.findData(app.cookie_mode)
-        if idx >= 0:
-            self.combo.setCurrentIndex(idx)
-        self.combo.currentIndexChanged.connect(self._refresh)
+        # ---- Vertical radio list with optional pill + help on Firefox row.
+        # Converted from QComboBox so we can inline a "Recommended" tag
+        # next to the Firefox option without a custom item delegate. ----
+        self.source_group = QButtonGroup(self)
+        self.source_group.setExclusive(True)
+        self.source_radios = {}
+        self._firefox_pill = None
+        self._firefox_help = None
 
+        sources_container = QWidget(self.body)
+        sources_lay = QVBoxLayout(sources_container)
+        sources_lay.setContentsMargins(0, 0, 0, 0)
+        sources_lay.setSpacing(4)
+
+        for key, label_key in COOKIE_MODES:
+            row_wrap = QWidget(sources_container)
+            row_lay = QHBoxLayout(row_wrap)
+            row_lay.setContentsMargins(0, 0, 0, 0)
+            row_lay.setSpacing(8)
+
+            radio = QRadioButton(t(label_key), row_wrap)
+            radio.setProperty("key", key)
+            radio.toggled.connect(
+                lambda checked, k=key: self._on_source_select(k, checked))
+            self.source_group.addButton(radio)
+            self.source_radios[key] = radio
+            row_lay.addWidget(radio, 0, Qt.AlignVCenter)
+
+            if key == "firefox":
+                self._firefox_pill = QLabel(t("cookies_recommended"), row_wrap)
+                self._firefox_pill.setStyleSheet(
+                    "background: rgba(94,106,210,0.15);"
+                    " color: #828FFF;"
+                    " border: 1px solid rgba(130,143,255,0.25);"
+                    " border-radius: 4px;"
+                    " padding: 1px 6px;"
+                    " font-size: 11px;"
+                    " font-weight: 500;")
+                row_lay.addWidget(self._firefox_pill, 0, Qt.AlignVCenter)
+
+                self._firefox_help = QLabel(row_wrap)
+                ic = _icon("mdi6.help-circle-outline", color="#62666D")
+                if not ic.isNull():
+                    self._firefox_help.setPixmap(ic.pixmap(12, 12))
+                else:
+                    self._firefox_help.setText("?")
+                    self._firefox_help.setStyleSheet(
+                        "color: #62666D; font-size: 11px;")
+                self._firefox_help.setToolTip(t("cookies_recommended_tooltip"))
+                self._firefox_help.setCursor(Qt.WhatsThisCursor)
+                row_lay.addWidget(self._firefox_help, 0, Qt.AlignVCenter)
+
+            row_lay.addStretch(1)
+            sources_lay.addWidget(row_wrap)
+
+        initial = self.source_radios.get(app.cookie_mode) \
+            or self.source_radios.get("none")
+        if initial is not None:
+            initial.blockSignals(True)
+            initial.setChecked(True)
+            initial.blockSignals(False)
+
+        root.addWidget(sources_container)
+
+        # ---- Test login button row ----
+        action_row = QHBoxLayout()
         self.test_btn = QPushButton(t("test_login"))
         self.test_btn.clicked.connect(self._test)
-
-        src_row.addWidget(self.combo, 0)
-        src_row.addWidget(self.test_btn, 0)
-        src_row.addStretch(1)
-        root.addLayout(src_row)
+        action_row.addWidget(self.test_btn, 0)
+        action_row.addStretch(1)
+        root.addLayout(action_row)
 
         self.test_result = QLabel("")
         self.test_result.setObjectName("Hint")
@@ -313,10 +368,30 @@ class AccountDialog(QDialog):
 
         root.addStretch(1)
 
+        # Self-documenting hint at the bottom so the dialog doesn't feel empty.
+        self.account_help = QLabel(t("account_help"))
+        self.account_help.setWordWrap(True)
+        self.account_help.setStyleSheet(
+            "color: #62666D; font-size: 11px;"
+            " letter-spacing: -0.15px;")
+        root.addWidget(self.account_help)
+
         self._refresh()
 
-    def _refresh(self, *_):
-        code = self.combo.currentData() or "none"
+    def _on_source_select(self, key, checked):
+        if not checked:
+            return
+        self._refresh(key)
+
+    def _selected_source(self):
+        for key, radio in self.source_radios.items():
+            if radio.isChecked():
+                return key
+        return "none"
+
+    def _refresh(self, code=None):
+        if code is None:
+            code = self._selected_source()
         self.app.cookie_mode = code
         self.app.cfg["cookie_mode"] = code
         save_config(self.app.cfg)
@@ -365,21 +440,23 @@ class AccountDialog(QDialog):
     def retranslate(self):
         try:
             self.setWindowTitle(t("account_title"))
+            self.set_title(t("account_title"))
             self.header.setText(t("account_source"))
             self.test_btn.setText(t("test_login"))
             self.pick_btn.setText(t("pick_file"))
+            self.account_help.setText(t("account_help"))
             if not self.app.cookie_file:
                 self.file_lbl.setText(t("no_file_selected"))
-            # rebuild combo items (preserve current data key)
-            current_key = self.combo.currentData()
-            self.combo.blockSignals(True)
-            self.combo.clear()
+            # Refresh source labels — the radio set itself stays put.
             for key, label_key in COOKIE_MODES:
-                self.combo.addItem(t(label_key), key)
-            idx = self.combo.findData(current_key)
-            if idx >= 0:
-                self.combo.setCurrentIndex(idx)
-            self.combo.blockSignals(False)
+                radio = self.source_radios.get(key)
+                if radio is not None:
+                    radio.setText(t(label_key))
+            if self._firefox_pill is not None:
+                self._firefox_pill.setText(t("cookies_recommended"))
+            if self._firefox_help is not None:
+                self._firefox_help.setToolTip(
+                    t("cookies_recommended_tooltip"))
             self._refresh()
         except Exception:
             pass
@@ -423,7 +500,7 @@ def rename_dialog(parent, current):
     dlg.setMinimumSize(480, 200)
 
     root = QVBoxLayout(dlg)
-    root.setContentsMargins(18, 18, 18, 18)
+    root.setContentsMargins(20, 20, 20, 20)
     root.setSpacing(8)
 
     h = QLabel(t("rename_prompt"))
@@ -431,7 +508,7 @@ def rename_dialog(parent, current):
     root.addWidget(h)
 
     entry = QLineEdit(current or "")
-    entry.setMinimumHeight(34)
+    entry.setMinimumHeight(40)
     root.addWidget(entry)
 
     hint = QLabel(t("rename_hint"))
@@ -469,7 +546,7 @@ def conflict_dialog(parent, filename):
     dlg.setMinimumSize(520, 240)
 
     root = QVBoxLayout(dlg)
-    root.setContentsMargins(18, 18, 18, 18)
+    root.setContentsMargins(20, 20, 20, 20)
     root.setSpacing(8)
 
     h = QLabel(t("conflict_body"))
@@ -486,7 +563,7 @@ def conflict_dialog(parent, filename):
     root.addWidget(prompt)
 
     entry = QLineEdit("")
-    entry.setMinimumHeight(34)
+    entry.setMinimumHeight(40)
     root.addWidget(entry)
 
     root.addStretch(1)
@@ -528,6 +605,22 @@ def conflict_dialog(parent, filename):
 
 
 # ---------------------------------------------------------------------------
+# Delete-file confirm — returns bool. Used by DownloadRow.delete_with_file
+# to warn before permanently nuking a file from disk.
+# ---------------------------------------------------------------------------
+def delete_file_confirm_dialog(parent, filename):
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Warning)
+    box.setWindowTitle(t("delete_file_confirm_title"))
+    box.setText(t("delete_file_confirm_message", filename=filename))
+    del_btn = box.addButton(t("delete"), QMessageBox.DestructiveRole)
+    cancel_btn = box.addButton(t("cancel"), QMessageBox.RejectRole)
+    box.setDefaultButton(cancel_btn)
+    box.exec()
+    return box.clickedButton() is del_btn
+
+
+# ---------------------------------------------------------------------------
 # Duplicate-video confirm — returns bool
 # ---------------------------------------------------------------------------
 def duplicate_dialog(parent, video_title):
@@ -557,7 +650,7 @@ class AboutDialog(QDialog):
         self.setMinimumSize(460, 360)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(22, 22, 22, 18)
+        root.setContentsMargins(24, 24, 24, 20)
         root.setSpacing(10)
 
         # App name (bilingual line) — large
@@ -605,11 +698,6 @@ class AboutDialog(QDialog):
 
         root.addStretch(1)
 
-        self.powered_label = QLabel(t("about_powered_by"))
-        self.powered_label.setObjectName("Hint")
-        self.powered_label.setAlignment(Qt.AlignCenter)
-        root.addWidget(self.powered_label)
-
         # close
         self.close_btn = QPushButton(t("close"))
         self.close_btn.clicked.connect(self.accept)
@@ -626,7 +714,6 @@ class AboutDialog(QDialog):
             self.dev_label.setText(t("about_developed_by"))
             self.site_btn.setText(t("about_visit_site"))
             self.donate_btn.setText(t("about_donate"))
-            self.powered_label.setText(t("about_powered_by"))
             self.close_btn.setText(t("close"))
         except Exception:
             pass

@@ -9,7 +9,8 @@ import shutil
 import threading
 
 from PIL import Image
-from PySide6.QtCore import (QEvent, QObject, QTimer, QUrl, Qt, Signal, Slot)
+from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QPropertyAnimation,
+                            QTimer, QUrl, Qt, Signal, Slot)
 from PySide6.QtGui import (QAction, QDesktopServices, QGuiApplication, QIcon,
                            QKeySequence, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox,
@@ -27,7 +28,9 @@ from i18n import Translator, t
 from ui.dialogs import (AccountDialog, AboutDialog, SettingsDialog,
                         conflict_dialog, duplicate_dialog, rename_dialog)
 from ui.download_row import DownloadRow
+from ui.icons import icon as _icon, isize as _isize
 from ui.tray import Tray
+from ui.window_chrome import FramelessMainWindow, TitleBar
 from updater import (UpdateChecker, UpdateDownloader, current_exe_path,
                      github_release_url, is_frozen, launch_updater)
 from utils import (classify_error, clean_error, extract_video_id,
@@ -45,7 +48,36 @@ class _AppBridge(QObject):
 
 
 # ---------------------------------------------------------------------------
-class App(QMainWindow):
+# Sort options — stable keys + i18n labels. The dropdown order here IS the
+# order users see, so the most useful options sit at the top.
+# ---------------------------------------------------------------------------
+SORT_OPTIONS = [
+    ("sort_date_added",         "sort_date_added"),
+    ("sort_date_added_oldest",  "sort_date_added_oldest"),
+    ("sort_name_az",            "sort_name_az"),
+    ("sort_name_za",            "sort_name_za"),
+    ("sort_size_largest",       "sort_size_largest"),
+    ("sort_size_smallest",      "sort_size_smallest"),
+    ("sort_duration_longest",   "sort_duration_longest"),
+    ("sort_duration_shortest",  "sort_duration_shortest"),
+]
+_SORT_KEYS = {key for key, _ in SORT_OPTIONS}
+
+# Legacy v1.3 sort_by values → new keys. Pre-v1.4 the dropdown stored
+# the localized English display strings; we also handle a few likely
+# lowercase variants in case anyone hand-edited their config.
+_LEGACY_SORT_MAP = {
+    "Last updated": "sort_date_added",
+    "last_updated": "sort_date_added",
+    "Title":        "sort_name_az",
+    "name":         "sort_name_az",
+    "Size":         "sort_size_largest",
+    "size":         "sort_size_largest",
+}
+
+
+# ---------------------------------------------------------------------------
+class App(FramelessMainWindow):
     def __init__(self, app_icon: QIcon = None):
         super().__init__()
         self.setObjectName("AppWindow")
@@ -53,8 +85,8 @@ class App(QMainWindow):
         if not self._app_icon.isNull():
             self.setWindowIcon(self._app_icon)
         self.setWindowTitle(t("app_title"))
-        self.resize(960, 800)
-        self.setMinimumSize(820, 640)
+        self.resize(780, 820)
+        self.setMinimumSize(640, 640)
 
         # ---- config ----
         self.cfg = load_config()
@@ -66,6 +98,7 @@ class App(QMainWindow):
         self.cfg.setdefault("minimize_to_tray", True)
         self.cfg.setdefault("lang", Translator.lang())
         self.cfg.setdefault("per_page", 15)   # 15 | 30 | 50 | 0 (= all)
+        self.cfg.setdefault("compact_mode", False)
 
         # Pagination
         self.page_size = int(self.cfg.get("per_page", 15) or 0)
@@ -86,7 +119,13 @@ class App(QMainWindow):
 
         self.active_tab = "All"
         self.search_query = ""
-        self.sort_by = "Last updated"
+        # Sort options are stored under stable string keys so they survive
+        # both restarts and i18n switches. Old v1.3 stored a localized
+        # display string ("Last updated", "Title", "Size") — migrate
+        # those to the new key set before reading.
+        self.sort_by = self._migrate_sort_key(
+            self.cfg.get("sort_by"), default="sort_date_added")
+        self.cfg["sort_by"] = self.sort_by
 
         self.active_count = 0
         self.batch_completed = 0
@@ -101,6 +140,7 @@ class App(QMainWindow):
 
         # ---- UI ----
         self._build_ui()
+        self._apply_window_direction()  # mirror children in RTL languages
         self._check_ffmpeg()
         self._load_downloads()
 
@@ -120,68 +160,115 @@ class App(QMainWindow):
         self._autofetch_timer.setSingleShot(True)
         self._autofetch_timer.timeout.connect(self._autofetch)
 
+    @staticmethod
+    def _migrate_sort_key(value, default="sort_date_added"):
+        """Coerce a stored sort_by value to one of the current SORT_OPTIONS
+        keys. Handles legacy v1.3 values and unrecognised garbage."""
+        if value in _SORT_KEYS:
+            return value
+        return _LEGACY_SORT_MAP.get(value, default)
+
     # ==================================================================
-    # UI construction
+    # UI construction — frameless rounded shell with custom chrome
     # ==================================================================
     def _build_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(18, 14, 18, 14)
-        root.setSpacing(10)
+        # The QMainWindow's central widget is a single rounded solid frame
+        # (#WindowShell). The actual rounded clip is done by the
+        # FramelessMainWindow base class via setMask in resizeEvent.
+        shell_container = QWidget()
+        shell_container.setStyleSheet("background: transparent;")
+        self.setCentralWidget(shell_container)
+        outer_lay = QVBoxLayout(shell_container)
+        outer_lay.setContentsMargins(0, 0, 0, 0)
+        outer_lay.setSpacing(0)
 
-        # ----- UPDATE BANNER (hidden until updater fires) -----
+        self.window_shell = QFrame()
+        self.window_shell.setObjectName("WindowShell")
+        outer_lay.addWidget(self.window_shell)
+
+        root = QVBoxLayout(self.window_shell)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ---- Custom title bar ----
+        self.title_bar = TitleBar(self.window_shell)
+        self.title_bar.cookies_clicked.connect(self._open_account)
+        self.title_bar.settings_clicked.connect(self._open_settings)
+        self.title_bar.compact_toggled.connect(self._toggle_compact)
+        root.addWidget(self.title_bar)
+
+        # ---- Optional download-progress banner (used during update DL) ----
         self._build_update_banner()
         root.addWidget(self.update_banner)
         self.update_banner.hide()
 
-        # ----- TOP BAR -----
-        top = QHBoxLayout()
-        top.setSpacing(8)
+        # ---- URL row (link icon + entry + Fetch) ----
+        url_row = QFrame()
+        url_row.setObjectName("UrlRow")
+        url_row.setFixedHeight(60)
+        url_lay = QHBoxLayout(url_row)
+        url_lay.setContentsMargins(12, 10, 12, 10)
+        url_lay.setSpacing(8)
 
-        self.url_pill = QFrame()
-        self.url_pill.setObjectName("UrlPill")
-        self.url_pill.setFixedHeight(44)
-        pill_layout = QHBoxLayout(self.url_pill)
-        pill_layout.setContentsMargins(14, 4, 6, 4)
-        pill_layout.setSpacing(6)
-        magn = QLabel("🔍")
-        magn.setStyleSheet("color: #8A8F98; font-size: 14px;")
-        pill_layout.addWidget(magn)
+        # Build a sub-frame so we can place the leading icon inside the input.
+        self.url_pill = QFrame(url_row)
+        self.url_pill.setObjectName("UrlPillV2")
+        self.url_pill.setFixedHeight(36)
+        pill_lay = QHBoxLayout(self.url_pill)
+        pill_lay.setContentsMargins(0, 0, 0, 0)
+        pill_lay.setSpacing(0)
         self.url_entry = QLineEdit()
-        self.url_entry.setObjectName("UrlEntry")
+        self.url_entry.setObjectName("UrlEntryV2")
         self.url_entry.setPlaceholderText(t("url_placeholder"))
         self.url_entry.setClearButtonEnabled(True)
         self.url_entry.returnPressed.connect(self._fetch)
         self.url_entry.textChanged.connect(self._on_url_change)
         self.url_entry.setContextMenuPolicy(Qt.CustomContextMenu)
         self.url_entry.customContextMenuRequested.connect(self._show_url_menu)
-        pill_layout.addWidget(self.url_entry, 1)
-        self.fetch_btn = QPushButton(t("fetch"))
-        self.fetch_btn.setProperty("role", "primary")
+        # Leading link icon inside the entry (qtawesome vector).
+        from PySide6.QtGui import QAction as _QAction
+        link_act = _QAction(self.url_entry)
+        link_ic = _icon("link", color="#62666D")
+        if not link_ic.isNull():
+            link_act.setIcon(link_ic)
+        else:
+            link_act.setText("🔗")  # fallback if qtawesome missing
+        link_act.setEnabled(False)
+        self.url_entry.addAction(link_act, QLineEdit.LeadingPosition)
+        pill_lay.addWidget(self.url_entry, 1)
+        url_lay.addWidget(self.url_pill, 1)
+
+        self.fetch_btn = QPushButton(t("fetch_button"))
+        self.fetch_btn.setObjectName("FetchBtnV2")
         self.fetch_btn.clicked.connect(self._fetch)
-        pill_layout.addWidget(self.fetch_btn)
-        top.addWidget(self.url_pill, 1)
+        url_lay.addWidget(self.fetch_btn, 0)
+        root.addWidget(url_row)
 
-        self.settings_btn = QPushButton("⚙")
-        self.settings_btn.setProperty("role", "icon")
-        self.settings_btn.setToolTip(t("settings"))
-        self.settings_btn.clicked.connect(self._open_settings)
-        top.addWidget(self.settings_btn)
-
-        self.account_btn = QPushButton("🔐")
-        self.account_btn.setProperty("role", "icon")
-        self.account_btn.setToolTip(t("account"))
-        self.account_btn.clicked.connect(self._open_account)
-        top.addWidget(self.account_btn)
-
-        root.addLayout(top)
+        # ----- Indeterminate fetch loading indicator (2 px sliver) -----
+        # Shown only while _FetchWorker is in flight so the user knows the
+        # app is doing something during the 2–5 s yt-dlp lookup.
+        self.fetch_loading_bar = QProgressBar()
+        self.fetch_loading_bar.setObjectName("FetchLoadingBar")
+        self.fetch_loading_bar.setRange(0, 0)  # 0..0 → indeterminate marquee
+        self.fetch_loading_bar.setTextVisible(False)
+        self.fetch_loading_bar.setFixedHeight(2)
+        self.fetch_loading_bar.setStyleSheet(
+            "QProgressBar#FetchLoadingBar {"
+            "  background: transparent;"
+            "  border: 0;"
+            "}"
+            "QProgressBar#FetchLoadingBar::chunk {"
+            "  background: #5E6AD2;"
+            "}"
+        )
+        self.fetch_loading_bar.hide()
+        root.addWidget(self.fetch_loading_bar)
 
         # ----- SINGLE-VIDEO OPTIONS CARD (hidden until fetch) -----
         self.options_card = QFrame()
         self.options_card.setObjectName("PanelCard")
         oc = QVBoxLayout(self.options_card)
-        oc.setContentsMargins(14, 12, 14, 12)
+        oc.setContentsMargins(16, 12, 16, 12)
         oc.setSpacing(8)
 
         # preview row
@@ -233,7 +320,7 @@ class App(QMainWindow):
         self.playlist_card = QFrame()
         self.playlist_card.setObjectName("PanelCard")
         pc = QVBoxLayout(self.playlist_card)
-        pc.setContentsMargins(14, 12, 14, 12)
+        pc.setContentsMargins(16, 12, 16, 12)
         pc.setSpacing(8)
 
         self.playlist_title_label = QLabel("")
@@ -286,66 +373,103 @@ class App(QMainWindow):
         root.addWidget(self.playlist_card)
         self.playlist_card.hide()
 
-        # ----- GLOBAL STATUS -----
+        # ---- Global status (transient hint line shown under URL row) ----
         self.global_status = QLabel("")
         self.global_status.setObjectName("Hint")
+        self.global_status.setContentsMargins(12, 0, 12, 0)
         root.addWidget(self.global_status)
 
-        # ----- TABS -----
-        tabs_row = QHBoxLayout()
-        self.tabs_group, self.tabs_btns = self._make_segmented(
-            [("All", t("tab_all")),
-             ("Video", t("tab_video")),
-             ("Audio", t("tab_audio"))],
-            self._on_tab_change, current="All")
-        for b in self.tabs_btns:
-            tabs_row.addWidget(b)
-        tabs_row.addStretch(1)
-        root.addLayout(tabs_row)
+        # ---- Filter row: pills (left) + search/sort (right) ----
+        filter_row = QFrame()
+        filter_row.setObjectName("FilterRow")
+        filter_row.setFixedHeight(52)
+        flay = QHBoxLayout(filter_row)
+        flay.setContentsMargins(12, 12, 12, 12)
+        flay.setSpacing(6)
 
-        # ----- DOWNLOADS PANEL -----
-        panel = QFrame()
-        panel.setObjectName("PanelCard")
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(14, 12, 14, 12)
-        panel_layout.setSpacing(8)
+        self.tabs_btns = []
+        self._tab_labels = {"All": t("tab_all"),
+                            "Video": t("tab_video"),
+                            "Audio": t("tab_audio")}
+        for key in ("All", "Video", "Audio"):
+            btn = QPushButton(self._tab_labels[key], filter_row)
+            btn.setProperty("key", key)
+            btn.setProperty("role", "pill")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(
+                lambda _=False, k=key: self._on_tab_change(k))
+            self.tabs_btns.append(btn)
+            flay.addWidget(btn)
 
-        header = QHBoxLayout()
-        self.search_entry = QLineEdit()
-        self.search_entry.setObjectName("SearchEntry")
-        self.search_entry.setPlaceholderText(t("search_downloads"))
+        # ---- Search input — always visible, flexible width, slot
+        # between pills and sort. Replaces the earlier icon-only button. ----
+        self.search_entry = QLineEdit(filter_row)
+        self.search_entry.setObjectName("SearchEntryCompact")
+        self.search_entry.setPlaceholderText(t("search_placeholder"))
         self.search_entry.setClearButtonEnabled(True)
-        self.search_entry.setFixedWidth(260)
+        self.search_entry.setMinimumWidth(140)
+        self.search_entry.setMaximumWidth(280)
+        self.search_entry.setSizePolicy(QSizePolicy.Expanding,
+                                        QSizePolicy.Fixed)
+        # Leading magnifier inside the field.
+        from PySide6.QtGui import QAction as _QAction
+        search_act = _QAction(self.search_entry)
+        s_ic = _icon("search", color="#62666D")
+        if not s_ic.isNull():
+            search_act.setIcon(s_ic)
+        else:
+            search_act.setText("🔍")
+        search_act.setEnabled(False)
+        self.search_entry.addAction(search_act, QLineEdit.LeadingPosition)
         self.search_entry.textChanged.connect(self._on_search)
-        header.addWidget(self.search_entry)
+        # search_btn is no longer in the layout; keep an alias for legacy
+        # references / shortcuts.
+        self.search_btn = self.search_entry
+        flay.addWidget(self.search_entry, 1)
 
-        sort_lbl = QLabel(t("sort_by"))
-        sort_lbl.setObjectName("Hint")
-        header.addWidget(sort_lbl)
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItem(t("sort_last_updated"), "Last updated")
-        self.sort_combo.addItem(t("sort_title"), "Title")
-        self.sort_combo.addItem(t("sort_size"), "Size")
+        self.sort_combo = QComboBox(filter_row)
+        self.sort_combo.setObjectName("SortCompact")
+        for key, label_key in SORT_OPTIONS:
+            self.sort_combo.addItem(t(label_key), key)
+        idx = self.sort_combo.findData(self.sort_by)
+        if idx >= 0:
+            self.sort_combo.setCurrentIndex(idx)
+        # The new labels are longer than v1.3's three options (e.g.
+        # "Date added (newest)"), so the dropdown needs more room. The
+        # popup widens automatically once items render.
+        self.sort_combo.setFixedWidth(180)
         self.sort_combo.currentIndexChanged.connect(self._on_sort)
-        header.addWidget(self.sort_combo)
+        flay.addWidget(self.sort_combo)
 
-        header.addStretch(1)
-
-        self.clear_btn = QPushButton(t("clear_all"))
-        self.clear_btn.setProperty("role", "danger")
+        self.clear_btn = QPushButton("", filter_row)
+        self.clear_btn.setProperty("role", "clearDanger")
+        self.clear_btn.setToolTip(t("clear_all"))
+        self.clear_btn.setCursor(Qt.PointingHandCursor)
+        clr_ic = _icon("close", color="#EB5757")
+        if not clr_ic.isNull():
+            self.clear_btn.setIcon(clr_ic)
+            self.clear_btn.setIconSize(_isize(14))
+        else:
+            self.clear_btn.setText("✕")
         self.clear_btn.clicked.connect(self.clear_all)
-        header.addWidget(self.clear_btn)
+        flay.addWidget(self.clear_btn)
 
-        panel_layout.addLayout(header)
+        root.addWidget(filter_row)
 
-        # scroll list
+        # ---- Main downloads panel (no border — sits flush in shell) ----
+        panel = QWidget()
+        panel.setObjectName("PanelInline")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(12, 8, 12, 0)
+        panel_layout.setSpacing(6)
+
         self.list_scroll = QScrollArea()
         self.list_scroll.setWidgetResizable(True)
         self.list_scroll.setFrameShape(QFrame.NoFrame)
         self.list_inner = QWidget()
         self.list_layout = QVBoxLayout(self.list_inner)
         self.list_layout.setContentsMargins(0, 0, 0, 0)
-        self.list_layout.setSpacing(8)
+        self.list_layout.setSpacing(6)
         self.empty_label = QLabel(t("empty_hint"))
         self.empty_label.setObjectName("Hint")
         self.empty_label.setAlignment(Qt.AlignCenter)
@@ -354,93 +478,178 @@ class App(QMainWindow):
         self.list_scroll.setWidget(self.list_inner)
         panel_layout.addWidget(self.list_scroll, 1)
 
-        # ---- Panel footer: count · pagination · per-page ----
-        footer = QHBoxLayout()
-        footer.setSpacing(8)
+        # ---- Pagination row ----
+        pag_row = QFrame()
+        pag_row.setObjectName("PaginationRow")
+        pag_row.setFixedHeight(36)
+        pag_lay = QHBoxLayout(pag_row)
+        pag_lay.setContentsMargins(10, 8, 10, 8)
+        pag_lay.setSpacing(8)
 
-        self.count_label = QLabel(t("downloads_count", count=0))
-        self.count_label.setObjectName("Hint")
-        footer.addWidget(self.count_label, 0)
+        self.pagination_summary = QLabel("", pag_row)
+        self.pagination_summary.setObjectName("PaginationLabel")
+        pag_lay.addWidget(self.pagination_summary, 0)
 
-        footer.addStretch(1)
+        pag_lay.addStretch(1)
 
-        # Pagination — buttons get rebuilt dynamically by _render_pagination
-        self.pagination_wrap = QWidget()
+        self.pagination_wrap = QWidget(pag_row)
         self.pagination_layout = QHBoxLayout(self.pagination_wrap)
         self.pagination_layout.setContentsMargins(0, 0, 0, 0)
         self.pagination_layout.setSpacing(4)
-        footer.addWidget(self.pagination_wrap, 0)
+        pag_lay.addWidget(self.pagination_wrap, 0)
 
-        footer.addStretch(1)
-
-        # Per-page dropdown
-        self.per_page_combo = QComboBox()
+        self.per_page_combo = QComboBox(pag_row)
+        self.per_page_combo.setObjectName("SortCompact")
         self.per_page_combo.addItem(t("per_page", n=15), 15)
         self.per_page_combo.addItem(t("per_page", n=30), 30)
         self.per_page_combo.addItem(t("per_page", n=50), 50)
         self.per_page_combo.addItem(t("per_page_all"), 0)
-        # restore saved value
         saved = int(self.cfg.get("per_page", 15) or 0)
         idx = self.per_page_combo.findData(saved)
         if idx >= 0:
             self.per_page_combo.setCurrentIndex(idx)
-        self.per_page_combo.currentIndexChanged.connect(self._on_per_page_change)
-        footer.addWidget(self.per_page_combo, 0)
+        self.per_page_combo.currentIndexChanged.connect(
+            self._on_per_page_change)
+        pag_lay.addWidget(self.per_page_combo, 0)
 
-        panel_layout.addLayout(footer)
+        panel_layout.addWidget(pag_row)
+
+        # count_label is no longer in panel — it lives in footer. Keep an
+        # invisible placeholder so legacy retranslate code still works.
+        self.count_label = QLabel("", self)
+        self.count_label.hide()
 
         root.addWidget(panel, 1)
+        self._main_panel = panel  # kept so external code can reach it
 
-        # ---- Bottom status bar (version + update indicator) ----
-        self._build_status_bar(root)
+        # ---- Footer strip ----
+        self._build_footer(root)
+
+        # ---- Highlight the initial active tab ----
+        self._update_pill_state()
+
+        # ---- Drop shadows ----
+        self._apply_linear_shadows()
+
+        # ---- Keyboard shortcuts ----
+        self._add_shortcuts()
+
+    def _build_footer(self, root):
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QGraphicsDropShadowEffect
+        from ui.theme import L1, BORDER
+        self.footer_strip = QFrame()
+        self.footer_strip.setObjectName("FooterStrip")
+        self.footer_strip.setFixedHeight(32)
+        flay = QHBoxLayout(self.footer_strip)
+        flay.setContentsMargins(14, 6, 14, 6)
+        flay.setSpacing(8)
+        self.footer_left = QLabel("", self.footer_strip)
+        self.footer_left.setObjectName("FooterText")
+        flay.addWidget(self.footer_left, 1, Qt.AlignVCenter)
+
+        # ---- Right cluster: [● dot] [Update vX.Y.Z pill?] [v1.3.0] ----
+        # Locked LTR so the dot is always visually left of the version,
+        # regardless of the surrounding RTL content direction.
+        self.footer_right_wrap = QWidget(self.footer_strip)
+        self.footer_right_wrap.setLayoutDirection(Qt.LeftToRight)
+        right_lay = QHBoxLayout(self.footer_right_wrap)
+        right_lay.setContentsMargins(0, 0, 0, 0)
+        right_lay.setSpacing(6)
+
+        # 7 px status dot — green/yellow/gray with a soft glow.
+        self.footer_status_dot = QLabel("●", self.footer_right_wrap)
+        self.footer_status_dot.setStyleSheet(
+            "color: #62666D; font-size: 9px; background: transparent;")
+        self._footer_dot_glow = QGraphicsDropShadowEffect(
+            self.footer_status_dot)
+        self._footer_dot_glow.setBlurRadius(8)
+        self._footer_dot_glow.setOffset(0, 0)
+        self._footer_dot_glow.setColor(QColor(98, 102, 109, 102))
+        self.footer_status_dot.setGraphicsEffect(self._footer_dot_glow)
+        right_lay.addWidget(self.footer_status_dot, 0, Qt.AlignVCenter)
+
+        # Inline "Update vX.Y.Z" pill — only visible when an update is
+        # available. Same brand-tinted styling as before; click triggers
+        # _on_update_now (the same handler the title-bar pill used to call).
+        self.footer_update_pill = QPushButton("", self.footer_right_wrap)
+        self.footer_update_pill.setObjectName("UpdatePill")
+        self.footer_update_pill.setCursor(Qt.PointingHandCursor)
+        self.footer_update_pill.setStyleSheet(
+            "QPushButton#UpdatePill {"
+            "  background: rgba(94,106,210,0.15);"
+            "  border: 1px solid rgba(130,143,255,0.4);"
+            "  border-radius: 9px;"
+            "  color: #828FFF;"
+            "  padding: 0 8px;"
+            "  font-size: 11px;"
+            "  font-weight: 600;"
+            "  min-height: 18px;"
+            "}"
+            "QPushButton#UpdatePill:hover {"
+            "  background: rgba(94,106,210,0.25);"
+            "}"
+        )
+        self.footer_update_pill.clicked.connect(self._on_update_now)
+        self.footer_update_pill.hide()
+        right_lay.addWidget(self.footer_update_pill, 0, Qt.AlignVCenter)
+
+        self.footer_right = QLabel("", self.footer_right_wrap)
+        self.footer_right.setObjectName("FooterText")
+        right_lay.addWidget(self.footer_right, 0, Qt.AlignVCenter)
+
+        flay.addWidget(self.footer_right_wrap, 0, Qt.AlignVCenter)
+        root.addWidget(self.footer_strip)
+        self._update_footer_stats()
+
+    def _apply_linear_shadows(self):
+        """Drop shadows for elevated cards. The shell itself gets a small
+        outer shadow so it reads as a floating window."""
+        from ui.theme import (apply_shadow, SHADOW_CARD, SHADOW_PANEL)
+        apply_shadow(self.window_shell, **SHADOW_PANEL)
+        apply_shadow(self.options_card,  **SHADOW_CARD)
+        apply_shadow(self.playlist_card, **SHADOW_CARD)
 
     # ==================================================================
-    # Update banner — built as part of _build_ui
+    # Update banner — slim progress strip shown only DURING download.
+    # The "available" announcement lives in the title bar pill now.
     # ==================================================================
     def _build_update_banner(self):
-        """Slim banner that surfaces 'update available'. Hidden by default."""
+        from ui.theme import (ACCENT_TINT, ACCENT_TINT_BORDER, TEXT)
         self.update_banner = QFrame()
         self.update_banner.setObjectName("UpdateBanner")
         self.update_banner.setStyleSheet(
             "QFrame#UpdateBanner {"
-            "  background: #1F2240;"
-            "  border: 1px solid #525E9E;"
-            "  border-radius: 10px;"
+            f"  background: {ACCENT_TINT};"
+            f"  border-top: 1px solid {ACCENT_TINT_BORDER};"
+            f"  border-bottom: 1px solid {ACCENT_TINT_BORDER};"
             "}"
         )
-        self.update_banner.setFixedHeight(44)
+        self.update_banner.setFixedHeight(36)
 
         lay = QHBoxLayout(self.update_banner)
-        lay.setContentsMargins(14, 4, 8, 4)
+        lay.setContentsMargins(12, 4, 12, 4)
         lay.setSpacing(8)
 
         self.update_label = QLabel("")
-        self.update_label.setStyleSheet("color: #F7F8F8; font-size: 12px;")
+        self.update_label.setStyleSheet(
+            f"color: {TEXT}; font-size: 11px; font-weight: 500;"
+            " letter-spacing: -0.15px;")
         lay.addWidget(self.update_label, 1)
 
         self.update_progress = QProgressBar()
         self.update_progress.setRange(0, 1000)
         self.update_progress.setValue(0)
         self.update_progress.setTextVisible(False)
-        self.update_progress.setFixedWidth(180)
+        self.update_progress.setFixedWidth(140)
         self.update_progress.hide()
         lay.addWidget(self.update_progress)
 
-        self.update_action_btn = QPushButton(t("update_now"))
-        self.update_action_btn.setCursor(Qt.PointingHandCursor)
-        self.update_action_btn.clicked.connect(self._on_update_now)
-        lay.addWidget(self.update_action_btn)
-
-        self.update_dismiss_btn = QPushButton("✕")
-        self.update_dismiss_btn.setProperty("role", "kebab")
-        self.update_dismiss_btn.setCursor(Qt.PointingHandCursor)
-        self.update_dismiss_btn.clicked.connect(self.update_banner.hide)
-        lay.addWidget(self.update_dismiss_btn)
-
-        # internal state
+        # Internal state (also used by the title-bar pill click handler)
         self._update_tag = ""
         self._update_asset_url = ""
         self._update_size = 0
+        self._update_state = "unknown"
 
     # ==================================================================
     # Update flow
@@ -465,15 +674,10 @@ class App(QMainWindow):
         self._update_tag = tag
         self._update_asset_url = asset_url
         self._update_size = size
-        if is_frozen() and asset_url:
-            self.update_label.setText(t("update_available", version=tag))
-            self.update_action_btn.setText(t("update_now"))
-        else:
-            self.update_label.setText(t("update_source_hint", version=tag))
-            self.update_action_btn.setText(t("update_open_github"))
-        self.update_progress.hide()
-        self.update_action_btn.setEnabled(True)
-        self.update_banner.show()
+        # The user-facing announcement is the yellow dot + "Update vX.Y.Z"
+        # pill in the title bar — no inline banner unless we actually
+        # start downloading.
+        self.update_banner.hide()
         self._set_update_status("available", tag)
 
     @Slot()
@@ -496,12 +700,12 @@ class App(QMainWindow):
         if not is_frozen() or not self._update_asset_url:
             QDesktopServices.openUrl(QUrl(github_release_url()))
             return
-        # start the download
-        self.update_action_btn.setEnabled(False)
+        # start the download — show the slim progress banner just below
+        # the title bar for the duration of the swap.
         self.update_progress.show()
         self.update_progress.setValue(0)
-        self.update_label.setText(
-            t("update_downloading", percent=0))
+        self.update_label.setText(t("update_downloading", percent=0))
+        self.update_banner.show()
         self._update_downloader = UpdateDownloader(self)
         self._update_downloader.progress.connect(self._on_update_progress)
         self._update_downloader.download_done.connect(self._on_update_downloaded)
@@ -518,8 +722,6 @@ class App(QMainWindow):
     @Slot(str)
     def _on_update_downloaded(self, local_path):
         self.update_label.setText(t("update_ready"))
-        self.update_action_btn.hide()
-        self.update_dismiss_btn.hide()
         exe = current_exe_path()
         if not exe:
             return
@@ -534,76 +736,40 @@ class App(QMainWindow):
     def _on_update_failed(self, msg):
         self.update_label.setText(t("update_dl_failed", msg=msg))
         self.update_progress.hide()
-        self.update_action_btn.setEnabled(True)
 
     # ==================================================================
-    # Bottom status bar (version + colored indicator + Update button)
+    # Update status — rendered as the footer's dot + inline "Update" pill.
+    # Moved from the title bar in v1.4 so the title bar is identical in
+    # every language and stays minimal.
     # ==================================================================
-    def _build_status_bar(self, root):
-        self.status_bar = QFrame()
-        self.status_bar.setObjectName("BottomStatusBar")
-        self.status_bar.setStyleSheet(
-            "QFrame#BottomStatusBar {"
-            "  background: #0F1011;"
-            "  border: 1px solid #23252A;"
-            "  border-radius: 10px;"
-            "}"
-        )
-        self.status_bar.setFixedHeight(48)  # tall enough for primary btn + descenders
-        lay = QHBoxLayout(self.status_bar)
-        lay.setContentsMargins(12, 0, 12, 0)
-        lay.setSpacing(8)
-
-        self.bar_version_label = QLabel(f"v{APP_VERSION}")
-        self.bar_version_label.setStyleSheet(
-            "color: #D0D6E0; font-size: 11px; font-weight: 600;")
-        lay.addWidget(self.bar_version_label)
-
-        self.bar_dot = QLabel("●")
-        self.bar_dot.setStyleSheet("color: #62666D; font-size: 14px;")
-        lay.addWidget(self.bar_dot)
-
-        self.bar_status_text = QLabel(t("status_unknown"))
-        self.bar_status_text.setStyleSheet("color: #8A8F98; font-size: 11px;")
-        lay.addWidget(self.bar_status_text)
-
-        lay.addStretch(1)
-
-        self.bar_update_btn = QPushButton(t("status_update_button"))
-        self.bar_update_btn.setProperty("role", "primary")
-        self.bar_update_btn.setCursor(Qt.PointingHandCursor)
-        self.bar_update_btn.clicked.connect(self._on_update_now)
-        self.bar_update_btn.hide()
-        lay.addWidget(self.bar_update_btn)
-
-        self._update_state = "unknown"  # unknown | checking | up_to_date | available | failed
-        root.addWidget(self.status_bar)
-
     def _set_update_status(self, state: str, version: str = ""):
         """state ∈ {unknown, checking, up_to_date, available, failed}"""
         self._update_state = state
-        if state == "checking":
-            self.bar_dot.setStyleSheet("color: #62666D; font-size: 14px;")
-            self.bar_status_text.setText(t("status_checking"))
-            self.bar_update_btn.hide()
-        elif state == "up_to_date":
-            self.bar_dot.setStyleSheet("color: #27A644; font-size: 14px;")
-            self.bar_status_text.setText(t("status_up_to_date"))
-            self.bar_update_btn.hide()
-        elif state == "available":
-            self.bar_dot.setStyleSheet("color: #F0BF00; font-size: 14px;")
-            self.bar_status_text.setText(
-                t("status_update_available", version=version))
-            self.bar_update_btn.setText(t("status_update_button"))
-            self.bar_update_btn.show()
-        elif state == "failed":
-            self.bar_dot.setStyleSheet("color: #62666D; font-size: 14px;")
-            self.bar_status_text.setText(t("status_check_failed"))
-            self.bar_update_btn.hide()
-        else:
-            self.bar_dot.setStyleSheet("color: #62666D; font-size: 14px;")
-            self.bar_status_text.setText(t("status_unknown"))
-            self.bar_update_btn.hide()
+        self._update_tag = version or self._update_tag
+        try:
+            from PySide6.QtGui import QColor
+            colors = {
+                "unknown":     ("#62666D", (98, 102, 109)),
+                "checking":    ("#62666D", (98, 102, 109)),
+                "up_to_date":  ("#27A644", (39, 166, 68)),
+                "available":   ("#F0BF00", (240, 191, 0)),
+                "failed":      ("#62666D", (98, 102, 109)),
+            }
+            hex_, rgb = colors.get(state, colors["unknown"])
+            self.footer_status_dot.setStyleSheet(
+                f"color: {hex_}; font-size: 9px; background: transparent;")
+            r, g, b = rgb
+            self._footer_dot_glow.setColor(QColor(r, g, b, 102))
+
+            if state == "available" and version:
+                clean = version.lstrip("vV")
+                self.footer_update_pill.setText(
+                    t("status_update_available", version=f"v{clean}"))
+                self.footer_update_pill.show()
+            else:
+                self.footer_update_pill.hide()
+        except Exception:
+            pass
 
     # ==================================================================
     # Pagination
@@ -628,22 +794,34 @@ class App(QMainWindow):
             return
         self.pagination_wrap.setVisible(True)
 
-        def make_btn(text, page=None, active=False, enabled=True):
+        def make_btn(text, page=None, active=False, enabled=True,
+                     icon_name=None):
             b = QPushButton(text)
             b.setCursor(Qt.PointingHandCursor)
-            if active:
-                b.setProperty("role", "tabActive")
-            else:
-                b.setProperty("role", "tab")
+            b.setProperty("role",
+                          "pageBtnActive" if active else "pageBtn")
             b.setEnabled(enabled)
+            if icon_name:
+                col = "#62666D" if enabled else "#3E3E44"
+                ic = _icon(icon_name, color=col)
+                if not ic.isNull():
+                    b.setText("")
+                    b.setIcon(ic)
+                    b.setIconSize(_isize(11))
             if page is not None and enabled and not active:
                 b.clicked.connect(lambda _=False, p=page: self._goto_page(p))
             return b
 
         cur = self.current_page
+        # In RTL, the "previous" arrow points right and "next" points left
+        # so the icons match the reading direction.
+        is_rtl = Translator.is_rtl()
+        prev_icon = "chevron_r" if is_rtl else "chevron_l"
+        next_icon = "chevron_l" if is_rtl else "chevron_r"
         # prev arrow
         self.pagination_layout.addWidget(
-            make_btn("‹", page=max(1, cur - 1), enabled=cur > 1))
+            make_btn("‹", page=max(1, cur - 1),
+                     enabled=cur > 1, icon_name=prev_icon))
 
         # window of page numbers with ellipsis
         def add_page(p):
@@ -667,7 +845,7 @@ class App(QMainWindow):
         # next arrow
         self.pagination_layout.addWidget(
             make_btn("›", page=min(total_pages, cur + 1),
-                     enabled=cur < total_pages))
+                     enabled=cur < total_pages, icon_name=next_icon))
 
     def _goto_page(self, page: int):
         self.current_page = max(1, page)
@@ -684,12 +862,37 @@ class App(QMainWindow):
         Translator.load(code)
         self.cfg["lang"] = code
         save_config(self.cfg)
-        # flip layout direction live
+        # flip layout direction live (window + every child + open dialogs)
         app = QApplication.instance()
         if app is not None:
             app.setLayoutDirection(
                 Qt.RightToLeft if Translator.is_rtl() else Qt.LeftToRight)
+        self._apply_window_direction()
         self.retranslate()
+
+    def _apply_window_direction(self):
+        """Push the active text direction onto the window + chrome.
+        The title bar reorders its brand / right-icons clusters; all
+        other widgets inherit and mirror naturally."""
+        rtl = Translator.is_rtl()
+        direction = Qt.RightToLeft if rtl else Qt.LeftToRight
+        self.setLayoutDirection(direction)
+        try:
+            self.title_bar.apply_layout_direction(direction)
+        except Exception:
+            pass
+        # Pagination chevrons swap meaning in RTL — re-render so they
+        # use chevron-right for "previous" etc.
+        try:
+            self._refresh_list()
+        except Exception:
+            pass
+        # Any open dialog also flips.
+        for dlg in self.findChildren(QDialog):
+            try:
+                dlg.setLayoutDirection(direction)
+            except Exception:
+                pass
 
     def retranslate(self):
         """Re-apply every translated string. Called after the active language
@@ -699,11 +902,16 @@ class App(QMainWindow):
         block the rest of the tree from updating."""
         self.setWindowTitle(t("app_title"))
 
-        # Top bar
+        # URL row
         self.url_entry.setPlaceholderText(t("url_placeholder"))
-        self.fetch_btn.setText(t("fetch"))
-        self.settings_btn.setToolTip(t("settings"))
-        self.account_btn.setToolTip(t("account"))
+        self.fetch_btn.setText(t("fetch_button"))
+        # Title bar button tooltips
+        try:
+            self.title_bar.compact_btn.setToolTip(t("compact_mode"))
+            self.title_bar.cookies_btn.setToolTip(t("account"))
+            self.title_bar.settings_btn.setToolTip(t("settings"))
+        except Exception:
+            pass
 
         # Options card
         self._retranslate_segmented(
@@ -719,37 +927,24 @@ class App(QMainWindow):
             {"mp4": t("format_mp4"), "mp3": t("format_mp3")})
         self.pl_download_btn.setText(t("download_selected"))
 
-        # Tabs
-        self._retranslate_segmented(
-            self.tabs_btns,
-            {"All": t("tab_all"), "Video": t("tab_video"),
-             "Audio": t("tab_audio")})
+        # Filter pills — re-cache labels and refresh counts
+        self._tab_labels = {"All": t("tab_all"),
+                            "Video": t("tab_video"),
+                            "Audio": t("tab_audio")}
+        self._update_pill_counts()
 
-        # Downloads panel header
-        self.search_entry.setPlaceholderText(t("search_downloads"))
+        # Search / sort / clear
+        self.search_entry.setPlaceholderText(t("search_placeholder"))
         self._rebuild_sort_combo()
-        self.clear_btn.setText(t("clear_all"))
+        self.clear_btn.setToolTip(t("clear_all"))
 
-        # Empty hint
+        # Empty hint + per-page combo
         self.empty_label.setText(t("empty_hint"))
-
-        # Footer count + per-page combo
-        self.count_label.setText(
-            t("downloads_count",
-              count=sum(1 for r in self.rows.values() if r.visible)))
         self._rebuild_per_page_combo()
 
-        # Update banner — re-issue current state's text
-        if self.update_banner.isVisible() and self._update_tag:
-            self._on_update_available(self._update_tag,
-                                      self._update_asset_url,
-                                      self._update_size)
-        self.update_action_btn.setText(
-            t("update_now") if is_frozen() and self._update_asset_url
-            else t("update_open_github"))
-
-        # Bottom status bar
+        # Status dot via title bar
         self._set_update_status(self._update_state, self._update_tag)
+        self._update_footer_stats()
 
         # Per-row UI
         for row in self.rows.values():
@@ -783,12 +978,11 @@ class App(QMainWindow):
                 b.setText(key_to_label[key])
 
     def _rebuild_sort_combo(self):
-        current_key = self.sort_combo.currentData() or "Last updated"
+        current_key = self.sort_combo.currentData() or self.sort_by
         self.sort_combo.blockSignals(True)
         self.sort_combo.clear()
-        self.sort_combo.addItem(t("sort_last_updated"), "Last updated")
-        self.sort_combo.addItem(t("sort_title"), "Title")
-        self.sort_combo.addItem(t("sort_size"), "Size")
+        for key, label_key in SORT_OPTIONS:
+            self.sort_combo.addItem(t(label_key), key)
         idx = self.sort_combo.findData(current_key)
         if idx >= 0:
             self.sort_combo.setCurrentIndex(idx)
@@ -929,6 +1123,9 @@ class App(QMainWindow):
         self.fetch_btn.setEnabled(False)
         self.fetch_btn.setText(t("fetching"))
         self._set_global(t("fetching_info"), "muted")
+        # Marquee bar — indeterminate animation runs natively while the
+        # worker thread queries yt-dlp.
+        self.fetch_loading_bar.show()
         cookie_opts = self._cookie_opts()
         self._fetcher = _FetchWorker(url, cookie_opts, self)
         self._fetcher.fetched_video.connect(self._fetch_done)
@@ -939,7 +1136,8 @@ class App(QMainWindow):
     @Slot(str, dict, list)
     def _fetch_done(self, url, info, heights):
         self.fetch_btn.setEnabled(True)
-        self.fetch_btn.setText(t("fetch"))
+        self.fetch_btn.setText(t("fetch_button"))
+        self.fetch_loading_bar.hide()
         self.current_info = info
         self.fetched_url = url
         if not heights:
@@ -992,7 +1190,8 @@ class App(QMainWindow):
     @Slot(str)
     def _fetch_failed(self, msg):
         self.fetch_btn.setEnabled(True)
-        self.fetch_btn.setText(t("fetch"))
+        self.fetch_btn.setText(t("fetch_button"))
+        self.fetch_loading_bar.hide()
         self._set_global(t("fetch_failed", msg=msg), "err")
 
     # ==================================================================
@@ -1001,7 +1200,8 @@ class App(QMainWindow):
     @Slot(str, dict, list)
     def _playlist_fetched(self, url, info, entries):
         self.fetch_btn.setEnabled(True)
-        self.fetch_btn.setText(t("fetch"))
+        self.fetch_btn.setText(t("fetch_button"))
+        self.fetch_loading_bar.hide()
         self.fetched_url = url
         self.current_info = info
         self.playlist_url = url
@@ -1249,14 +1449,115 @@ class App(QMainWindow):
     # ==================================================================
     def _on_tab_change(self, key):
         self.active_tab = key
+        self._update_pill_state()
         self._refresh_list()
+
+    def _update_pill_state(self):
+        for b in self.tabs_btns:
+            key = b.property("key")
+            active = (key == self.active_tab)
+            b.setProperty("role", "pillActive" if active else "pill")
+            try:
+                b.style().unpolish(b); b.style().polish(b)
+            except Exception:
+                pass
+
+    def _update_pill_counts(self, filtered_total=None):
+        """Pill labels include the count for that filter category."""
+        n_all   = len(self.items)
+        n_video = sum(1 for it in self.items if it.fmt == "mp4")
+        n_audio = sum(1 for it in self.items if it.fmt == "mp3")
+        counts = {"All": n_all, "Video": n_video, "Audio": n_audio}
+        for b in self.tabs_btns:
+            key = b.property("key")
+            label = self._tab_labels.get(key, key)
+            b.setText(f"{label} · {counts.get(key, 0)}")
+
+    # ------------------------------------------------------------------
+    # Footer stats (left: active/completed, right: speed · version)
+    # ------------------------------------------------------------------
+    def _update_footer_stats(self):
+        try:
+            completed = sum(1 for i in self.items if i.status == "completed")
+            self.footer_left.setText(
+                t("footer_active_completed",
+                  active=self.active_count, completed=completed))
+            # Aggregate live download speed by hooking into items — for now
+            # we just show the version on the right.
+            self.footer_right.setText(
+                t("footer_speed_idle", version=APP_VERSION))
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Compact mode (NEW): shrink rows in place
+    # ------------------------------------------------------------------
+    def _toggle_compact(self):
+        new_val = not bool(self.cfg.get("compact_mode", False))
+        self.cfg["compact_mode"] = new_val
+        save_config(self.cfg)
+        for row in self.rows.values():
+            try:
+                row.set_compact(new_val)
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # Keyboard shortcuts
+    # ------------------------------------------------------------------
+    def _add_shortcuts(self):
+        def sc(seq, fn):
+            s = QShortcut(QKeySequence(seq), self)
+            s.activated.connect(fn)
+            return s
+
+        sc("Ctrl+W", self.close)
+        sc("Ctrl+M", self.showMinimized)
+        sc("F11",    self._toggle_max_restore)
+        sc("Ctrl+,", self._open_settings)
+        sc("Ctrl+L", lambda: (self.url_entry.setFocus(),
+                              self.url_entry.selectAll()))
+        sc("Ctrl+F", lambda: (self.search_entry.setFocus(),
+                              self.search_entry.selectAll()))
+        sc("Ctrl+V", self._shortcut_paste_url)
+
+    def _toggle_max_restore(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+
+    # (Search expand-on-click + animation removed — see the comment in
+    # the filter row build. The hidden self.search_entry is kept so the
+    # filter pipeline + i18n call sites still work; click currently no-ops.)
+
+    def _shortcut_paste_url(self):
+        # Only intercept when the URL field has focus or no other input does.
+        try:
+            focused = QApplication.focusWidget()
+        except Exception:
+            focused = None
+        if focused is not None and focused is not self.url_entry:
+            # Let the focused widget handle paste itself.
+            if isinstance(focused, QLineEdit):
+                focused.paste()
+                return
+        self.url_entry.setFocus()
+        self.url_entry.paste()
+        # if it looks like a YouTube URL, kick auto-fetch
+        from config import YT_URL_RE
+        if YT_URL_RE.match(self.url_entry.text().strip()):
+            self._fetch()
 
     def _on_search(self, _txt):
         self.search_query = self.search_entry.text().strip()
         self._refresh_list()
 
     def _on_sort(self, _idx):
-        self.sort_by = self.sort_combo.currentData() or "Last updated"
+        key = self.sort_combo.currentData() or "sort_date_added"
+        self.sort_by = self._migrate_sort_key(key)
+        self.cfg["sort_by"] = self.sort_by
+        save_config(self.cfg)
         self._refresh_list()
 
     def _refresh_list(self):
@@ -1271,14 +1572,51 @@ class App(QMainWindow):
             else:
                 row.setVisibleRow(False)
 
-        if self.sort_by == "Title":
-            filtered.sort(
-                key=lambda i: (i.custom_filename or i.title or "").lower())
-        elif self.sort_by == "Size":
-            filtered.sort(
-                key=lambda i: i.size_on_disk or i.size_bytes, reverse=True)
+        # Helpers — each returns None for "missing field". Rows with a
+        # missing field always sink to the end regardless of direction.
+        def _name_key(it):
+            v = (it.custom_filename or it.title or "").strip()
+            return v.lower() or None
+
+        def _size_key(it):
+            v = it.size_on_disk or it.size_bytes
+            return v if v else None
+
+        def _dur_key(it):
+            return it.duration if it.duration else None
+
+        def _added_key(it):
+            return it.added_at or None
+
+        def _sort_with_missing_last(key_fn, reverse=False):
+            have, miss = [], []
+            for it in filtered:
+                if key_fn(it) is None:
+                    miss.append(it)
+                else:
+                    have.append(it)
+            have.sort(key=key_fn, reverse=reverse)
+            return have + miss
+
+        if self.sort_by == "sort_name_az":
+            filtered = _sort_with_missing_last(_name_key)
+        elif self.sort_by == "sort_name_za":
+            filtered = _sort_with_missing_last(_name_key, reverse=True)
+        elif self.sort_by == "sort_size_largest":
+            filtered = _sort_with_missing_last(_size_key, reverse=True)
+        elif self.sort_by == "sort_size_smallest":
+            filtered = _sort_with_missing_last(_size_key)
+        elif self.sort_by == "sort_duration_longest":
+            filtered = _sort_with_missing_last(_dur_key, reverse=True)
+        elif self.sort_by == "sort_duration_shortest":
+            filtered = _sort_with_missing_last(_dur_key)
+        elif self.sort_by == "sort_date_added_oldest":
+            filtered = _sort_with_missing_last(_added_key)
         else:
-            filtered.sort(key=lambda i: i.last_updated, reverse=True)
+            # Default: sort_date_added (newest first). This IS the
+            # download history order — added_at is set when the row
+            # first enters the session.
+            filtered = _sort_with_missing_last(_added_key, reverse=True)
 
         # Pagination: slice to current page.
         total = len(filtered)
@@ -1319,6 +1657,16 @@ class App(QMainWindow):
         self.empty_label.setVisible(len(self.items) == 0)
         self.count_label.setText(t("downloads_count", count=total))
         self._render_pagination(total_pages)
+
+        # Pagination summary ("Showing 4 of 17")
+        shown_n = len(page_items) if self.page_size > 0 else total
+        self.pagination_summary.setText(
+            t("pagination_showing", current=shown_n, total=total))
+
+        # Pill counts ("All · 17")
+        self._update_pill_counts(filtered_total=total)
+        # Footer line
+        self._update_footer_stats()
 
     # ==================================================================
     # Persistence
@@ -1368,6 +1716,7 @@ class App(QMainWindow):
     # ==================================================================
     def on_download_started(self):
         self.active_count += 1
+        self._update_footer_stats()
 
     def on_download_finished_signal_emit(self):
         """Called from a worker thread — emits a queued signal."""
@@ -1394,6 +1743,7 @@ class App(QMainWindow):
             self.batch_completed = completed
             self.batch_failed = failed
         self.save_downloads()
+        self._update_footer_stats()
 
     # ==================================================================
     # Clipboard watcher (QClipboard signal)
