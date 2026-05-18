@@ -1,6 +1,16 @@
 <div align="center">
 
-**محمّل فيديوهات لسطح المكتب — Desktop Video Downloader**
+<picture>
+  <img alt="Nazzil" src="assets/images/nazzil_logo.png" width="480" />
+</picture>
+
+<br/>
+<br/>
+
+<img src="assets/images/screenshot.png" alt="Nazzil screenshot" width="480" />
+
+<br/>
+<br/>
 
 [Download Latest Release](https://github.com/Hjbiki/Nazzil/releases/latest)
 
