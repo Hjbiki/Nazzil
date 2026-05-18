@@ -128,6 +128,7 @@ build.bat
 - [creators.sa/hibiki](https://creators.sa/hibiki)
 - [tip.dokan.sa/hibiki](https://tip.dokan.sa/hibiki)
 
+تم إنشاؤه بمساعدة كلود (Anthropic)
 ### الرخصة
 
 مفتوح المصدر. راجع ملف LICENSE للتفاصيل.
@@ -236,6 +237,7 @@ Anad Askar
 - [creators.sa/hibiki](https://creators.sa/hibiki)
 - [tip.dokan.sa/hibiki](https://tip.dokan.sa/hibiki)
 
+Built with assistance from Claude (Anthropic)
 ### License
 
 Open source. See the LICENSE file for details.
