@@ -1,164 +1,226 @@
 <div align="center">
 
-# Nazzil — نزّل
+<picture>
+  <img alt="Nazzil" src="assets/images/nazzil_logo.png" width="480" />
+</picture>
 
-**A clean, modern desktop video downloader for Windows.**
-**محمّل فيديو حديث وأنيق لسطح المكتب على ويندوز.**
+<br/>
+<br/>
 
-Version 1.5.0 · Built with Python + PySide6 + yt-dlp
+<img src="assets/images/screenshot.png" alt="Nazzil screenshot" width="480" />
 
-</div>
+<br/>
+<br/>
+
+[Download Latest Release](https://github.com/Hjbiki/Nazzil/releases/latest)
 
 ---
 
-## English
+</div>
 
-**Nazzil** is a desktop downloader for YouTube and 1800+ other sites
-(X/Twitter, Instagram, TikTok, Facebook, Vimeo, Twitch, Reddit, and more),
-with a Linear-inspired dark/light UI and full Arabic (RTL) support.
+<div dir="rtl" align="right">
 
-### Download
+## نزّل
 
-**Recommended: `NazzilSetup.exe`** — the installer bundles ffmpeg, ffprobe
-and aria2c inside it, so Nazzil works **100% offline right after install**.
-No internet needed after install, and nothing extra to install yourself.
-A small portable `Nazzil.exe` is also available; it fetches those tools
-silently on first run (one-time, requires internet that once).
+محمّل فيديوهات مجاني ومفتوح المصدر لسطح المكتب. الصق الرابط، اختر الجودة، وحمّل. يدعم يوتيوب وأكثر من 1800 موقع آخر.
 
-### Highlights
+---
 
-- **Zero install — nothing extra to set up.** The installer ships ffmpeg,
-  ffprobe and aria2c bundled, so everything works offline immediately. The
-  portable build fetches them silently on first launch as a fallback. You
-  never install any external tool yourself and never see an
-  "install ffmpeg" message.
-- **Any site, not just YouTube.** Paste a link from X, Instagram, TikTok,
-  Vimeo, Twitch, Reddit, Dailymotion, SoundCloud and more. The source is
-  detected automatically and shown with a brand-coloured tag.
-- **Formats made clear.** Choose **Video + Audio (MP4)** up to 4K, or
-  **Audio only (MP3)**. Default audio quality is **320 kbps** (128 / 192 /
-  320 selectable).
-- **Per-row controls.** Completed rows get a **▶ Play** button, **Show in
-  folder**, and a **⋯ More** menu (Retry, Copy link, Rename, Remove,
-  Delete file). Duration is shown on the info line — never over the
-  thumbnail.
-- **Light & Dark themes.** Switch instantly from Settings — no restart,
-  just like the language switch.
-- **Update check that actually tells you.** "Check for updates" shows a
-  clear result: a new version is available (with an Update button), you're
-  on the latest version, or the check failed.
-- **Single instance.** Launching Nazzil again just brings the running
-  window to the front instead of opening a second copy.
-- **Keyboard shortcuts help.** Press **F1** (or open it from Settings) for
-  a full reference card.
-- **System tray.** Close to tray, get notified when a batch finishes.
-- **Live language switch** (العربية / English) with full RTL mirroring,
-  unlimited parallel downloads, playlists, clipboard auto-fill, search /
-  sort / filter, pagination, and session persistence.
+### وش يسوي؟
+
+نزّل تطبيق ويندوز مبني بـ Python و Qt، يستخدم yt-dlp للتحميل و ffmpeg للدمج والتحويل. صُمّم بأسلوب Linear مع واجهة نظيفة ومرتبة، ويدعم المظهرين الداكن والفاتح.
+
+### صفر تثبيت
+
+كل الأدوات مضمّنة داخل التطبيق — ffmpeg و ffprobe و aria2c. لا تحتاج لتثبيت أي شيء، ولا إلى تعديل PATH. مثبّت **NazzilSetup.exe** يعمل بدون إنترنت تمامًا بعد التثبيت.
+
+### المميزات
+
+**التحميل**
+
+- تحميل فيديو + صوت بجودة تصل إلى 4K (MP4)
+- تحميل صوت فقط بجودات 128 / 192 / 320 kbps (MP3) مع غلاف الألبوم والبيانات الوصفية — **الافتراضي 320 kbps**
+- تحميلات متعددة بالتوازي، كل واحد بشريط تقدم مستقل
+- دعم الكوكيز لفيديوهات الأعضاء والمحتوى المقيّد بالعمر (Firefox موصى به)
+- دعم قوائم التشغيل مع إمكانية اختيار فيديوهات محددة
+- إعادة المحاولة تلقائياً عند الفشل (حتى 5 مرات)
+- تسريع التحميل عبر aria2c (مضمّن، اختياري — يعمل بصمت ويتراجع تلقائياً)
+- كشف التكرار وحل تعارض أسماء الملفات
+
+**الواجهة**
+
+- مظهر داكن وفاتح مع تبديل فوري من الإعدادات بدون إعادة تشغيل
+- نافذة بدون إطار مع شريط عنوان مخصص وزوايا مدوّرة
+- زر تشغيل ▶ على كل تحميل مكتمل + قائمة (إظهار في المجلد، نسخ الرابط، إعادة تسمية، حذف)
+- بحث وفرز وتصفية التحميلات (الكل / فيديو / صوت)
+- ثمانية خيارات فرز: تاريخ الإضافة، الاسم، الحجم، المدة (تصاعدي وتنازلي)
+- صفحات (15 / 30 / 50 لكل صفحة) ووضع مضغوط للصفوف
+- مراقبة الحافظة: تعبئة الرابط تلقائياً وبدء الجلب
+- نافذة اختصارات لوحة المفاتيح (F1)
+- عارض صور مدمج للصور المصغرة مع تكبير وتدوير
+- تصغير إلى منطقة الإشعارات مع تنبيه عند اكتمال جميع التحميلات
+- نسخة واحدة فقط: فتح التطبيق مرة أخرى يُظهر النافذة الموجودة بدل فتح نسخة جديدة
+
+**اللغات**
+
+- عربي وإنجليزي مع تبديل فوري بدون إعادة تشغيل ودعم كامل للاتجاه من اليمين لليسار
+
+**كشف المصدر**
+
+- يكتشف الموقع تلقائياً ويعرضه بلون العلامة التجارية (يوتيوب، X، إنستغرام، تيك توك، فيميو، تويتش، ساوندكلاود، ديلي موشن، وغيرها)
+- أي موقع غير معروف يُعرض باسم النطاق
+
+**التحديث**
+
+- يفحص التحديثات من GitHub Releases تلقائياً
+- "تحقّق من التحديثات" يعرض نتيجة واضحة: يتوفّر تحديث (مع زر تحديث)، أو أنت على آخر إصدار، أو فشل الاتصال
+- يحدّث نفسه بنقرة واحدة
+
+### التثبيت
+
+حمّل أحدث نسخة من صفحة [Releases](https://github.com/Hjbiki/Nazzil/releases/latest):
+
+- **NazzilSetup.exe** — المثبّت الكامل (موصى به) — يعمل بدون إنترنت فور التثبيت
+- **Nazzil.exe** — نسخة محمولة بدون تثبيت (تجلب الأدوات بصمت عند أول تشغيل)
+
+### المتطلبات
+
+لا يوجد. التطبيق يتضمّن كل ما يحتاجه — ffmpeg و ffprobe و aria2c مضمّنة بالكامل. لا حاجة لتثبيت أي أداة، ولا إلى PATH، ولا إنترنت بعد التثبيت.
+
+### اختصارات لوحة المفاتيح
+
+| الاختصار | الوظيفة |
+|---|---|
+| Ctrl+V | لصق الرابط وبدء الجلب |
+| Ctrl+L | التركيز على حقل الرابط |
+| Ctrl+F | التركيز على البحث |
+| Ctrl+, | الإعدادات |
+| Ctrl+M | التصغير إلى شريط المهام |
+| F11 | تكبير / استعادة |
+| Ctrl+W | الإغلاق إلى شريط المهام |
+| F1 | عرض اختصارات لوحة المفاتيح |
+
+### المطوّر
+
+عناد عسكر
+
+- [creators.sa/hibiki](https://creators.sa/hibiki)
+- [tip.dokan.sa/hibiki](https://tip.dokan.sa/hibiki)
+
+تم إنشاؤه بمساعدة كلود (Anthropic).
+
+### الرخصة
+
+مفتوح المصدر. راجع ملف LICENSE للتفاصيل.
+
+---
+
+</div>
+
+## Nazzil
+
+A free, open-source desktop video downloader. Paste a URL, pick your quality, download. Supports YouTube and 1800+ other sites.
+
+---
+
+### What is it?
+
+Nazzil is a Windows desktop app built with Python and Qt. It uses yt-dlp for downloading and ffmpeg for merging and conversion. The interface follows a Linear-inspired design with both dark and light themes.
+
+### Zero install
+
+Every tool is bundled inside the app — ffmpeg, ffprobe, and aria2c. You never install anything and never touch PATH. The **NazzilSetup.exe** installer works fully offline after install.
+
+### Features
+
+**Downloading**
+
+- Video + Audio downloads up to 4K (MP4)
+- Audio-only extraction at 128 / 192 / 320 kbps (MP3) with embedded cover art and metadata - **default 320 kbps**
+- Unlimited parallel downloads, each with its own progress bar
+- Cookie support for members-only and age-restricted content (Firefox recommended)
+- Playlist support with per-video selection
+- Auto-retry on failure (up to 5 attempts)
+- aria2c acceleration (bundled, optional - silent fallback if unavailable)
+- Duplicate detection and file-name conflict resolution (replace / rename / cancel)
+
+**Interface**
+
+- Dark and Light themes with instant switching from Settings (no restart)
+- Frameless window with a custom title bar and rounded corners
+- A Play button on every completed download, plus a menu (show in folder, copy link, rename, delete)
+- Search, sort, and filter downloads (All / Video / Audio tabs)
+- Eight sort options: date added, name, size, duration (ascending and descending)
+- Pagination (15 / 30 / 50 per page) and a compact row mode
+- Clipboard watcher: auto-fills and fetches when a video URL is copied
+- Keyboard shortcuts dialog (F1)
+- Built-in image viewer for thumbnails with zoom and rotate
+- Minimize to system tray with a notification when all downloads complete
+- Single instance: launching Nazzil again brings the existing window to the front
+
+**Languages**
+
+- Arabic and English with instant live switching (no restart) and full RTL support
+
+**Source detection**
+
+- Detects the site automatically and shows it with a brand-coloured tag (YouTube, X, Instagram, TikTok, Vimeo, Twitch, SoundCloud, Dailymotion, and more)
+- Any unknown site is shown by its domain name
+
+**Updates**
+
+- Checks GitHub Releases automatically
+- "Check for updates" shows a clear result: an update is available (with an Update button), you are on the latest version, or the check failed
+- Updates itself with one click
+
+### Install
+
+Download the latest build from the [Releases](https://github.com/Hjbiki/Nazzil/releases/latest) page:
+
+- **NazzilSetup.exe** - full installer (recommended) - works offline right after install
+- **Nazzil.exe** - portable, no install (fetches tools silently on first run)
+
+### Requirements
+
+None. Everything is bundled - ffmpeg, ffprobe, and aria2c ship with the app. No tool to install, no PATH setup, and no internet needed after install.
+
+### Build from source
+
+```bash
+git clone https://github.com/Hjbiki/Nazzil.git
+cd Nazzil
+pip install -r requirements.txt
+python main.py
+```
+
+To build the executable:
+
+```bash
+build.bat
+```
 
 ### Keyboard shortcuts
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl + V` | Paste URL & fetch |
-| `Ctrl + L` | Focus the URL field |
-| `Ctrl + F` | Focus the search field |
-| `Ctrl + ,` | Open settings |
-| `Ctrl + M` | Minimize to tray |
-| `F11` | Maximize / restore |
-| `Ctrl + W` | Close to tray |
-| `F1` | Show keyboard shortcuts |
+| Ctrl+V | Paste URL and fetch |
+| Ctrl+L | Focus the URL field |
+| Ctrl+F | Focus the search field |
+| Ctrl+, | Open settings |
+| Ctrl+M | Minimize to tray |
+| F11 | Maximize / restore |
+| Ctrl+W | Close to tray |
+| F1 | Show keyboard shortcuts |
 
-### Run from source
+### Developer
 
-```cmd
-pip install -r requirements.txt
-python main.py
-```
+Anad Askar
 
-### Build
+- [creators.sa/hibiki](https://creators.sa/hibiki)
+- [tip.dokan.sa/hibiki](https://tip.dokan.sa/hibiki)
 
-```cmd
-build.bat        REM fetches bundled tools, then PyInstaller → dist\Nazzil.exe
-```
+Built with the help of Claude (Anthropic).
 
----
+### License
 
-## العربية
-
-**نزّل** هو محمّل فيديو لسطح المكتب يدعم يوتيوب وأكثر من 1800 موقع آخر
-(إكس/تويتر، إنستغرام، تيك توك، فيسبوك، Vimeo، Twitch، Reddit، وغيرها)،
-بواجهة داكنة/فاتحة مستوحاة من Linear ودعم كامل للعربية (من اليمين لليسار).
-
-### التحميل
-
-**المُوصى به: `NazzilSetup.exe`** — المثبّت يضمّن ffmpeg و ffprobe و aria2c
-بداخله، فيعمل نزّل **بدون إنترنت تمامًا فور التثبيت**. لا حاجة لإنترنت بعد
-التثبيت، ولا أدوات إضافية تثبّتها بنفسك. تتوفّر أيضًا نسخة محمولة صغيرة
-`Nazzil.exe` تجلب هذه الأدوات بصمت عند أول تشغيل (مرة واحدة، تحتاج إنترنت
-تلك المرة فقط).
-
-### أبرز المزايا
-
-- **صفر تثبيت — لا حاجة لإعداد أي شيء.** المثبّت يضمّن ffmpeg و ffprobe و
-  aria2c، فيعمل كل شيء بدون إنترنت فورًا. والنسخة المحمولة تجلبها بصمت عند
-  أول تشغيل كحل احتياطي. لن تثبّت أي أداة خارجية بنفسك، ولن ترى رسالة
-  "ثبّت ffmpeg".
-- **أي موقع وليس يوتيوب فقط.** الصق رابطًا من إكس أو إنستغرام أو تيك توك أو
-  Vimeo أو Twitch أو Reddit أو Dailymotion أو SoundCloud وغيرها. يُكتشف
-  المصدر تلقائيًا ويظهر بعلامة ملوّنة بهوية الموقع.
-- **صيغ واضحة.** اختر **فيديو + صوت (MP4)** حتى دقة 4K، أو **صوت فقط (بدون
-  فيديو) (MP3)**. جودة الصوت الافتراضية **320 kbps** (مع خيارات 128 / 192 /
-  320).
-- **تحكّم لكل عنصر.** الصفوف المكتملة فيها زر **▶ تشغيل** و**إظهار في
-  المجلد** وقائمة **⋯ المزيد** (إعادة المحاولة، نسخ الرابط، إعادة تسمية،
-  إزالة، حذف الملف). تظهر المدة في سطر المعلومات — وليست فوق الصورة المصغّرة.
-- **مظهر فاتح وداكن.** بدّل فورًا من الإعدادات — بدون إعادة تشغيل، تمامًا
-  مثل تبديل اللغة.
-- **فحص تحديث يخبرك بالنتيجة فعلًا.** "تحقّق من التحديثات" يعرض نتيجة واضحة:
-  يتوفّر إصدار جديد (مع زر تحديث)، أو أنت على آخر إصدار، أو فشل التحقق.
-- **نسخة واحدة فقط.** فتح نزّل مرة أخرى يُظهر النافذة الشغّالة بدل فتح نسخة
-  ثانية.
-- **مساعدة اختصارات لوحة المفاتيح.** اضغط **F1** (أو افتحها من الإعدادات)
-  لعرض بطاقة الاختصارات كاملة.
-- **شريط المهام (Tray).** الإغلاق إلى شريط المهام، وتنبيه عند انتهاء
-  مجموعة التحميلات.
-- **تبديل لغة مباشر** (العربية / English) مع انعكاس كامل للاتجاه، وتحميلات
-  متوازية بلا حد، وقوائم تشغيل، وتعبئة تلقائية من الحافظة، وبحث/ترتيب/تصفية،
-  وترقيم صفحات، وحفظ الجلسة.
-
-### اختصارات لوحة المفاتيح
-
-| الاختصار | الإجراء |
-|---|---|
-| `Ctrl + V` | لصق الرابط والجلب |
-| `Ctrl + L` | التركيز على حقل الرابط |
-| `Ctrl + F` | التركيز على حقل البحث |
-| `Ctrl + ,` | فتح الإعدادات |
-| `Ctrl + M` | التصغير إلى شريط المهام |
-| `F11` | تكبير / استعادة |
-| `Ctrl + W` | الإغلاق إلى شريط المهام |
-| `F1` | عرض اختصارات لوحة المفاتيح |
-
-### التشغيل من المصدر
-
-```cmd
-pip install -r requirements.txt
-python main.py
-```
-
-### البناء
-
-```cmd
-build.bat        REM يجلب الأدوات المُضمّنة ثم PyInstaller → dist\Nazzil.exe
-```
-
----
-
-<div align="center">
-
-تطوير **عناد عسكر** — Developed by **Anad Askar**
-[الموقع / Website](https://creators.sa/hibiki) ·
-[ادعمني / Support](https://tip.dokan.sa/hibiki)
-
-</div>
+Open source. See the LICENSE file for details.

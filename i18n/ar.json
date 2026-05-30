@@ -45,6 +45,12 @@
   "download_started": "بدأ التحميل ✓ — تقدر تضيف رابطًا آخر الآن.",
   "set_folder_first": "حدّد مجلد الحفظ أولًا (⚙).",
 
+  "first_run_title": "مرحبًا بك في نزّل 👋",
+  "first_run_message": "لنختر أين تُحفظ الفيديوهات. يمكنك تغيير ذلك في أي وقت من الإعدادات.",
+  "first_run_choose": "اختر المجلد",
+  "first_run_dialog_title": "اختر مكان حفظ الفيديوهات",
+  "first_run_saved": "ستُحفظ الفيديوهات في: {folder}",
+
   "playlist_label": "قائمة تشغيل: {title}",
   "playlist_count_hint": "{count} فيديو — أزل العلامة عمّا لا تريده.",
   "select_all": "تحديد الكل",
@@ -66,12 +72,6 @@
   "aria2c_hint_off": "غير مفعّل — يُستخدم المُحمّل الافتراضي.",
   "clipboard_watch": "مراقبة الحافظة — تعبئة روابط يوتيوب المنسوخة تلقائيًا",
   "minimize_to_tray": "التصغير إلى شريط المهام بدل الإغلاق عند إغلاق النافذة",
-  "update_ytdlp": "تحديث yt-dlp",
-  "updating_ytdlp": "جاري التحديث…",
-  "update_running": "تنفيذ pip install -U yt-dlp…",
-  "update_already": "yt-dlp مُحدَّث إلى أحدث إصدار.",
-  "update_success": "تم تحديث yt-dlp بنجاح. أعد تشغيل نزّل لاستخدامه.",
-  "update_failed": "فشل التحديث. {msg}",
   "config_saved_at": "تُحفظ الإعدادات في ~/.yt_downloader_config.json",
 
   "account_title": "حساب يوتيوب",

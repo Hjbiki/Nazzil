@@ -58,6 +58,13 @@ a = Analysis(
     hiddenimports=[
         'yt_dlp',
         'yt_dlp.extractor',
+        # First-party app modules that MUST always be bundled. main.py imports
+        # ytdlp_updater before yt_dlp; listing it explicitly guarantees the
+        # silent background updater is packaged even if static analysis misses
+        # it. binaries / single_instance are listed for the same safety.
+        'ytdlp_updater',
+        'binaries',
+        'single_instance',
         'PIL',
         'PIL.Image',
         'PIL.ImageDraw',

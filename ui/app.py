@@ -173,6 +173,48 @@ class App(FramelessMainWindow):
         self._autofetch_timer.setSingleShot(True)
         self._autofetch_timer.timeout.connect(self._autofetch)
 
+        # First-run: ask where to save videos (once). Deferred so it shows
+        # after the window is up, not during construction.
+        if not self.folder:
+            QTimer.singleShot(350, self._first_run_choose_folder)
+
+    # ==================================================================
+    # First-run download-folder setup (happens once)
+    # ==================================================================
+    def _default_download_dir(self):
+        """A sensible default if the user skips the picker: ~/Downloads,
+        else ~/Videos, else the home folder."""
+        home = os.path.expanduser("~")
+        for name in ("Downloads", "Videos"):
+            cand = os.path.join(home, name)
+            if os.path.isdir(cand):
+                return cand
+        return home
+
+    def _set_folder(self, path):
+        self.folder = path
+        self.cfg["folder"] = path
+        save_config(self.cfg)
+
+    def _first_run_choose_folder(self):
+        """Shown once on first launch (no folder saved yet). Friendly prompt
+        then a folder picker. If the user cancels, fall back to a sensible
+        default — never block them. They can change it later in Settings."""
+        if self.folder:
+            return  # already set (race guard)
+        # Friendly heads-up first.
+        themed_message(self, t("first_run_title"), t("first_run_message"),
+                       primary=t("first_run_choose"))
+        chosen = QFileDialog.getExistingDirectory(
+            self, t("first_run_dialog_title"),
+            self._default_download_dir())
+        if chosen:
+            self._set_folder(chosen)
+            self._set_global(t("first_run_saved", folder=chosen), "ok")
+        else:
+            # Cancelled — use a default silently, don't force them.
+            self._set_folder(self._default_download_dir())
+
     @staticmethod
     def _migrate_sort_key(value, default="sort_date_added"):
         """Coerce a stored sort_by value to one of the current SORT_OPTIONS

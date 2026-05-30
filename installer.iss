@@ -31,8 +31,15 @@ DisableProgramGroupPage=yes
 OutputDir=output
 OutputBaseFilename=NazzilSetup
 SetupIconFile=assets\icon.ico
-Compression=lzma2/ultra
+; Strongest compression Inno Setup offers — shrinks the NazzilSetup.exe
+; download as much as possible. This only affects the installer file size;
+; the installed app is identical and just as fast after extraction.
+Compression=lzma2/ultra64
 SolidCompression=yes
+; Run the LZMA compressor in a separate process so the large bundled
+; binaries (ffmpeg/ffprobe ~190 MB combined) don't exhaust memory at the
+; ultra64 dictionary size during the build.
+LZMAUseSeparateProcess=yes
 WizardStyle=modern
 
 PrivilegesRequired=lowest

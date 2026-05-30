@@ -45,6 +45,12 @@
   "download_started": "Download started ✓ — paste the next URL anytime.",
   "set_folder_first": "Set a download folder first (⚙).",
 
+  "first_run_title": "Welcome to Nazzil 👋",
+  "first_run_message": "Let's pick where your videos will be saved. You can change this anytime in Settings.",
+  "first_run_choose": "Choose folder",
+  "first_run_dialog_title": "Choose where to save your videos",
+  "first_run_saved": "Videos will be saved to: {folder}",
+
   "playlist_label": "Playlist: {title}",
   "playlist_count_hint": "{count} videos — uncheck any you don't want.",
   "select_all": "Select all",
@@ -66,12 +72,6 @@
   "aria2c_hint_off": "Off — using the standard downloader.",
   "clipboard_watch": "Watch clipboard — auto-fill copied YouTube URLs",
   "minimize_to_tray": "Minimize to system tray instead of quitting on close",
-  "update_ytdlp": "Update yt-dlp",
-  "updating_ytdlp": "Updating…",
-  "update_running": "Running pip install -U yt-dlp…",
-  "update_already": "yt-dlp is already at the latest version.",
-  "update_success": "yt-dlp updated successfully. Restart Nazzil to use it.",
-  "update_failed": "Update failed. {msg}",
   "config_saved_at": "Config saved to ~/.yt_downloader_config.json",
 
   "account_title": "YouTube account",

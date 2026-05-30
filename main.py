@@ -23,13 +23,23 @@ from PySide6.QtCore import Qt                  # noqa: E402
 from PySide6.QtGui import QIcon                # noqa: E402
 from PySide6.QtWidgets import QApplication     # noqa: E402
 
+# Route `import yt_dlp` to a silently-cached newer copy if one exists
+# (frozen-only; no-op otherwise). Must run BEFORE importing yt_dlp.
+import ytdlp_updater                           # noqa: E402
+ytdlp_updater.bootstrap()
 try:
     import yt_dlp  # noqa: F401, E402
-except ImportError:
-    # yt-dlp is bundled inside the frozen app; this path only happens on a
-    # source checkout with missing deps. No user-facing install instruction.
-    sys.stderr.write("yt-dlp module unavailable.\n")
-    sys.exit(1)
+except Exception:
+    # A bad/partial cache could shadow the bundled copy — self-heal by
+    # purging it and falling back to the bundled yt-dlp.
+    ytdlp_updater.purge_cache()
+    try:
+        import yt_dlp  # noqa: F401, E402
+    except ImportError:
+        # Only reachable on a source checkout with missing deps. No
+        # user-facing install instruction.
+        sys.stderr.write("yt-dlp module unavailable.\n")
+        sys.exit(1)
 
 from config import DEFAULT_LANG, load_config   # noqa: E402
 from fonts import load_app_fonts               # noqa: E402
@@ -101,6 +111,9 @@ def main():
     single.activated.connect(window._tray_show)
     window.show()
     window.start_update_check()
+    # Silent, hands-off yt-dlp refresh in the background (frozen-only,
+    # at most once a day). No UI, no prompts — takes effect next launch.
+    ytdlp_updater.update_async()
     sys.exit(app.exec())
 
 

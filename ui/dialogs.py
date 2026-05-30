@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 """Qt dialogs: Settings, Account/cookies, Rename, File-conflict,
-Duplicate-video confirm, yt-dlp updater, About."""
+Duplicate-video confirm, Shortcuts, About."""
 
 import os
-import subprocess
-import sys
 import threading
 
 from PySide6.QtCore import QObject, Qt, QUrl, Signal, Slot
@@ -121,20 +119,10 @@ class SettingsDialog(FramelessDialog):
         chk_row.addWidget(self.check_updates_btn)
         root.addLayout(chk_row)
 
-        # --- yt-dlp updater ---
-        root.addSpacing(8)
-        upd_row = QHBoxLayout()
-        self.ytdlp_header = self._header("yt-dlp")
-        upd_row.addWidget(self.ytdlp_header)
-        upd_row.addStretch(1)
-        self.update_btn = QPushButton(t("update_ytdlp"))
-        self.update_btn.clicked.connect(self._do_update)
-        upd_row.addWidget(self.update_btn)
-        root.addLayout(upd_row)
-        self.update_status = QLabel()
-        self.update_status.setObjectName("Hint")
-        self.update_status.setWordWrap(True)
-        root.addWidget(self.update_status)
+        # NOTE: the old "Update yt-dlp" button was removed in v1.5.x. yt-dlp
+        # is bundled with the app and updates itself silently in the
+        # background (see ytdlp_updater.py) — the user never has to think
+        # about it, so there's no UI for it anymore.
 
         root.addStretch(1)
 
@@ -216,21 +204,6 @@ class SettingsDialog(FramelessDialog):
     def _open_shortcuts(self):
         ShortcutsDialog(self).exec()
 
-    # --- yt-dlp update (runs in a thread, reports via Signal) ---
-    def _do_update(self):
-        self.update_btn.setEnabled(False)
-        self.update_btn.setText(t("updating_ytdlp"))
-        self.update_status.setText(t("update_running"))
-        self._updater = _UpdaterWorker(self)
-        self._updater.done.connect(self._on_update_done)
-        self._updater.start()
-
-    @Slot(str, str)
-    def _on_update_done(self, msg, level):
-        self.update_btn.setEnabled(True)
-        self.update_btn.setText(t("update_ytdlp"))
-        self.update_status.setText(msg)
-
     # ------------------------------------------------------------------
     # Live language switch
     # ------------------------------------------------------------------
@@ -252,40 +225,11 @@ class SettingsDialog(FramelessDialog):
             self.tray_chk.setText(t("minimize_to_tray"))
             self.app_update_header.setText(t("app_short"))
             self.check_updates_btn.setText(t("check_for_updates"))
-            self.update_btn.setText(t("update_ytdlp"))
             self.about_btn.setText(t("about"))
             self.shortcuts_btn.setText(t("shortcuts_title"))
             self.cfg_hint.setText(t("config_saved_at"))
         except Exception:
             pass
-
-
-class _UpdaterWorker(QObject):
-    done = Signal(str, str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-    def start(self):
-        threading.Thread(target=self._run, daemon=True).start()
-
-    def _run(self):
-        try:
-            proc = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-U", "yt-dlp"],
-                capture_output=True, text=True, timeout=180)
-            out = (proc.stdout or "") + (proc.stderr or "")
-            low = out.lower()
-            if proc.returncode != 0:
-                self.done.emit(
-                    t("update_failed", msg=clean_error(out)), "err")
-            elif "already satisfied" in low and "upgrad" not in low:
-                self.done.emit(t("update_already"), "muted")
-            else:
-                self.done.emit(t("update_success"), "ok")
-        except Exception as e:
-            self.done.emit(
-                t("update_failed", msg=clean_error(str(e))), "err")
 
 
 # ---------------------------------------------------------------------------

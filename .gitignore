@@ -1,16 +1,26 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
 
+# Build artifacts (never publish)
 dist/
 build/
 output/
 *.spec.bak
-
-.env
 *.exe
 
-# Editor / OS junk
+# Local-only dev helpers & temp test artifacts (never publish)
+# Patterns anchored to repo root with a leading / so they only catch my
+# throwaway test files (_b.txt, _probe.txt, _dltest.py, ...) and NEVER
+# package files like i18n/__init__.py or ui/__init__.py.
+build_test.bat
+/_*.txt
+/_*.png
+/_*.py
+
+# Env / editor / OS junk
+.env
 .vscode/
 .idea/
 .DS_Store
