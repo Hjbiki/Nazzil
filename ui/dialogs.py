@@ -3,7 +3,6 @@
 Duplicate-video confirm, yt-dlp updater, About."""
 
 import os
-import shutil
 import subprocess
 import sys
 import threading
@@ -40,7 +39,6 @@ class SettingsDialog(FramelessDialog):
         root.addWidget(self.folder_header)
         folder_row = QHBoxLayout()
         self.folder_lbl = QLabel(app.folder or t("not_set"))
-        self.folder_lbl.setStyleSheet("color: #D0D6E0;")
         self.change_btn = QPushButton(t("change"))
         self.change_btn.setProperty("role", "primary")
         self.change_btn.clicked.connect(self._pick_folder)
@@ -64,6 +62,22 @@ class SettingsDialog(FramelessDialog):
         lang_row.addStretch(1)
         root.addLayout(lang_row)
         # No restart hint — language switches live (no app restart needed).
+
+        # --- theme (dark / light) ---
+        root.addSpacing(8)
+        self.theme_header = self._header(t("theme"))
+        root.addWidget(self.theme_header)
+        theme_row = QHBoxLayout()
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem(t("theme_dark"), "dark")
+        self.theme_combo.addItem(t("theme_light"), "light")
+        cur_theme = app.cfg.get("theme", "dark")
+        tidx = self.theme_combo.findData(cur_theme)
+        self.theme_combo.setCurrentIndex(tidx if tidx >= 0 else 0)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_change)
+        theme_row.addWidget(self.theme_combo, 0)
+        theme_row.addStretch(1)
+        root.addLayout(theme_row)
 
         # --- aria2c ---
         root.addSpacing(8)
@@ -129,6 +143,9 @@ class SettingsDialog(FramelessDialog):
         self.about_btn = QPushButton(t("about"))
         self.about_btn.clicked.connect(self._open_about)
         footer.addWidget(self.about_btn)
+        self.shortcuts_btn = QPushButton(t("shortcuts_title"))
+        self.shortcuts_btn.clicked.connect(self._open_shortcuts)
+        footer.addWidget(self.shortcuts_btn)
         footer.addStretch(1)
         self.cfg_hint = QLabel(t("config_saved_at"))
         self.cfg_hint.setObjectName("Hint")
@@ -155,19 +172,31 @@ class SettingsDialog(FramelessDialog):
         if hasattr(self.app, "set_language"):
             self.app.set_language(code)
 
+    def _on_theme_change(self, _idx):
+        mode = self.theme_combo.currentData()
+        if hasattr(self.app, "set_theme"):
+            self.app.set_theme(mode)
+
     def _on_aria_toggle(self, val):
         self.app.cfg["use_aria2c"] = bool(val)
         save_config(self.app.cfg)
         self._refresh_aria_hint()
 
     def _refresh_aria_hint(self):
-        present = shutil.which("aria2c") is not None
-        if self.aria_chk.isChecked() and not present:
-            self.aria_hint.setText(t("aria2c_hint_missing"))
+        # aria2c is bundled with the app, so detect it via binaries.aria2c_path
+        # (NOT shutil.which, which only sees PATH). aria2c is purely optional —
+        # we never tell the user to install anything.
+        import binaries
+        present = bool(binaries.aria2c_path())
+        if not self.aria_chk.isChecked():
+            self.aria_hint.setText(t("aria2c_hint_off"))
         elif present:
             self.aria_hint.setText(t("aria2c_hint_on"))
         else:
-            self.aria_hint.setText(t("aria2c_hint_off"))
+            # Toggle on but aria2c unavailable (rare — it ships bundled).
+            # Silent functional fallback to the default downloader; the hint
+            # is just an indicator, never an install instruction.
+            self.aria_hint.setText(t("aria2c_hint_missing"))
 
     def _on_clip_toggle(self, val):
         self.app.cfg["clipboard_watch"] = bool(val)
@@ -183,6 +212,9 @@ class SettingsDialog(FramelessDialog):
 
     def _open_about(self):
         AboutDialog(self).exec()
+
+    def _open_shortcuts(self):
+        ShortcutsDialog(self).exec()
 
     # --- yt-dlp update (runs in a thread, reports via Signal) ---
     def _do_update(self):
@@ -211,6 +243,9 @@ class SettingsDialog(FramelessDialog):
             if not self.app.folder:
                 self.folder_lbl.setText(t("not_set"))
             self.lang_header.setText(t("language"))
+            self.theme_header.setText(t("theme"))
+            self.theme_combo.setItemText(0, t("theme_dark"))
+            self.theme_combo.setItemText(1, t("theme_light"))
             self.aria_chk.setText(t("use_aria2c"))
             self._refresh_aria_hint()
             self.clip_chk.setText(t("clipboard_watch"))
@@ -219,6 +254,7 @@ class SettingsDialog(FramelessDialog):
             self.check_updates_btn.setText(t("check_for_updates"))
             self.update_btn.setText(t("update_ytdlp"))
             self.about_btn.setText(t("about"))
+            self.shortcuts_btn.setText(t("shortcuts_title"))
             self.cfg_hint.setText(t("config_saved_at"))
         except Exception:
             pass
@@ -357,7 +393,6 @@ class AccountDialog(FramelessDialog):
         self.file_lbl = QLabel(
             os.path.basename(app.cookie_file) if app.cookie_file
             else t("no_file_selected"))
-        self.file_lbl.setStyleSheet("color: #D0D6E0;")
         self.pick_btn = QPushButton(t("pick_file"))
         self.pick_btn.clicked.connect(self._pick_file)
         self.file_row_widget.addWidget(self.file_lbl, 1)
@@ -554,7 +589,6 @@ def conflict_dialog(parent, filename):
     root.addWidget(h)
 
     name_lbl = QLabel(filename)
-    name_lbl.setStyleSheet("color: #D0D6E0;")
     name_lbl.setWordWrap(True)
     root.addWidget(name_lbl)
 
@@ -621,6 +655,59 @@ def delete_file_confirm_dialog(parent, filename):
 
 
 # ---------------------------------------------------------------------------
+# Themed message dialog — same rounded shell as the rest of the app.
+# Returns True if the primary button was clicked, else False.
+# ---------------------------------------------------------------------------
+class _MessageDialog(FramelessDialog):
+    def __init__(self, parent, title, message, *,
+                 primary=None, secondary=None, accent="brand"):
+        super().__init__(title=title, parent=parent)
+        self.setMinimumWidth(420)
+        self._primary_clicked = False
+
+        root = QVBoxLayout(self.body)
+        root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(16)
+
+        from ui.theme import current as _theme
+        msg = QLabel(message)
+        msg.setWordWrap(True)
+        msg.setStyleSheet(
+            f"color: {_theme()['TEXT_DIM']}; font-size: 14px;"
+            " background: transparent;")
+        root.addWidget(msg)
+        root.addStretch(1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        if secondary:
+            sec = QPushButton(secondary)
+            sec.setProperty("role", "secondary")
+            sec.setCursor(Qt.PointingHandCursor)
+            sec.clicked.connect(self.reject)
+            btn_row.addWidget(sec)
+        if primary:
+            pri = QPushButton(primary)
+            pri.setProperty("role", "primary")
+            pri.setCursor(Qt.PointingHandCursor)
+            pri.clicked.connect(self._on_primary)
+            btn_row.addWidget(pri)
+        root.addLayout(btn_row)
+
+    def _on_primary(self):
+        self._primary_clicked = True
+        self.accept()
+
+
+def themed_message(parent, title, message, *, primary=None, secondary=None):
+    """Show a themed modal message. Returns True if `primary` was clicked."""
+    dlg = _MessageDialog(parent, title, message,
+                         primary=primary, secondary=secondary)
+    dlg.exec()
+    return dlg._primary_clicked
+
+
+# ---------------------------------------------------------------------------
 # Duplicate-video confirm — returns bool
 # ---------------------------------------------------------------------------
 def duplicate_dialog(parent, video_title):
@@ -637,78 +724,180 @@ def duplicate_dialog(parent, video_title):
 
 
 # ---------------------------------------------------------------------------
+# Keyboard shortcuts — reference card matching the app shell.
+# ---------------------------------------------------------------------------
+# (keys, i18n description key). Keys are shown in a monospace-ish chip.
+_SHORTCUTS = [
+    ("Ctrl + V",  "sc_paste"),
+    ("Ctrl + L",  "sc_focus_url"),
+    ("Ctrl + F",  "sc_focus_search"),
+    ("Ctrl + ,",  "sc_settings"),
+    ("Ctrl + M",  "sc_minimize"),
+    ("F11",       "sc_maximize"),
+    ("Ctrl + W",  "sc_close"),
+    ("F1",        "sc_help"),
+]
+
+
+class ShortcutsDialog(FramelessDialog):
+    """Read-only list of every keyboard shortcut, styled like the app."""
+
+    def __init__(self, parent=None):
+        super().__init__(title=t("shortcuts_title"), parent=parent)
+        self.setMinimumSize(440, 420)
+
+        root = QVBoxLayout(self.body)
+        root.setContentsMargins(20, 16, 20, 20)
+        root.setSpacing(6)
+
+        self._rows = []   # (keys_label, desc_label, desc_key)
+        for keys, desc_key in _SHORTCUTS:
+            row = QFrame(self.body)
+            row.setObjectName("ShortcutRow")
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(12, 8, 12, 8)
+            rl.setSpacing(12)
+
+            desc = QLabel(t(desc_key), row)
+            desc.setStyleSheet("background: transparent; font-size: 13px;")
+            rl.addWidget(desc, 1, Qt.AlignVCenter)
+
+            keycap = QLabel(keys, row)
+            keycap.setObjectName("Keycap")
+            keycap.setAlignment(Qt.AlignCenter)
+            rl.addWidget(keycap, 0, Qt.AlignVCenter)
+
+            row.setStyleSheet(
+                "QFrame#ShortcutRow { background: transparent;"
+                " border: 0; border-bottom: 1px solid rgba(128,128,128,0.15); }"
+                "QLabel#Keycap { background: rgba(128,128,128,0.12);"
+                " border: 1px solid rgba(128,128,128,0.25); border-radius: 5px;"
+                " padding: 2px 8px; font-size: 12px; font-weight: 600; }")
+            root.addWidget(row)
+            self._rows.append((keycap, desc, desc_key))
+
+        root.addStretch(1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        self.close_btn = QPushButton(t("close"))
+        self.close_btn.setProperty("role", "primary")
+        self.close_btn.setCursor(Qt.PointingHandCursor)
+        self.close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(self.close_btn)
+        root.addLayout(btn_row)
+
+    def retranslate(self):
+        try:
+            self.setWindowTitle(t("shortcuts_title"))
+            self.set_title(t("shortcuts_title"))
+            for _keycap, desc, desc_key in self._rows:
+                desc.setText(t(desc_key))
+            self.close_btn.setText(t("close"))
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # About — app name, credits, links, donation button
 # ---------------------------------------------------------------------------
 WEBSITE_URL  = "https://creators.sa/hibiki"
 DONATION_URL = "https://tip.dokan.sa/hibiki"
 
 
-class AboutDialog(QDialog):
+class AboutDialog(FramelessDialog):
+    """About card — same rounded gradient shell, fonts, and button styles
+    as the rest of Nazzil (it used to be a plain QDialog that looked out of
+    place)."""
+
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(t("about_title"))
-        self.setMinimumSize(460, 360)
+        super().__init__(title=t("about_title"), parent=parent)
+        self.setMinimumSize(440, 420)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(24, 24, 24, 20)
-        root.setSpacing(10)
+        root = QVBoxLayout(self.body)
+        root.setContentsMargins(28, 20, 28, 24)
+        root.setSpacing(8)
 
-        # App name (bilingual line) — large
+        root.addStretch(1)
+
+        # App icon (round-ish) above the wordmark for a polished header.
+        self.icon_label = QLabel()
+        self.icon_label.setAlignment(Qt.AlignCenter)
+        try:
+            import os
+            here = os.path.dirname(os.path.abspath(__file__))
+            icon_png = os.path.normpath(
+                os.path.join(here, "..", "assets", "icon.png"))
+            if os.path.exists(icon_png):
+                from PySide6.QtGui import QPixmap
+                pix = QPixmap(icon_png).scaled(
+                    64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.icon_label.setPixmap(pix)
+                root.addWidget(self.icon_label)
+                root.addSpacing(4)
+        except Exception:
+            pass
+
+        # App name (bilingual line) — large, palette-aware text colour.
+        from ui.theme import current as _theme
         self.name_label = QLabel("Nazzil — نزّل")
         self.name_label.setStyleSheet(
-            "font-size: 20px; font-weight: 700; color: #F7F8F8;")
+            f"font-size: 22px; font-weight: 700; color: {_theme()['TEXT']};"
+            " letter-spacing: -0.3px; background: transparent;")
         self.name_label.setAlignment(Qt.AlignCenter)
         root.addWidget(self.name_label)
 
-        self.version_label = QLabel(t("about_version_label", version=APP_VERSION))
+        self.version_label = QLabel(
+            t("about_version_label", version=APP_VERSION))
         self.version_label.setObjectName("Hint")
         self.version_label.setAlignment(Qt.AlignCenter)
         root.addWidget(self.version_label)
+
+        # developer
+        self.dev_label = QLabel(t("about_developed_by"))
+        self.dev_label.setStyleSheet(
+            f"color: {_theme()['TEXT_DIM']}; font-size: 13px;"
+            " background: transparent;")
+        self.dev_label.setAlignment(Qt.AlignCenter)
+        root.addSpacing(6)
+        root.addWidget(self.dev_label)
 
         # divider line
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setStyleSheet("color: #23252A; background: #23252A;")
         line.setFixedHeight(1)
-        root.addSpacing(4)
+        root.addSpacing(10)
         root.addWidget(line)
-        root.addSpacing(4)
+        root.addSpacing(12)
 
-        # developer
-        self.dev_label = QLabel(t("about_developed_by"))
-        self.dev_label.setStyleSheet("color: #D0D6E0; font-size: 13px;")
-        self.dev_label.setAlignment(Qt.AlignCenter)
-        root.addWidget(self.dev_label)
-
-        # website link
+        # ---- action buttons, all sharing the app button styles ----
         self.site_btn = QPushButton(t("about_visit_site"))
+        self.site_btn.setProperty("role", "secondary")
         self.site_btn.setCursor(Qt.PointingHandCursor)
         self.site_btn.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(WEBSITE_URL)))
-        root.addWidget(self.site_btn, alignment=Qt.AlignCenter)
+        root.addWidget(self.site_btn)
 
-        # donation button (primary, accent)
         self.donate_btn = QPushButton(t("about_donate"))
         self.donate_btn.setProperty("role", "primary")
         self.donate_btn.setCursor(Qt.PointingHandCursor)
         self.donate_btn.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(DONATION_URL)))
-        root.addSpacing(6)
-        root.addWidget(self.donate_btn, alignment=Qt.AlignCenter)
+        root.addWidget(self.donate_btn)
+
+        self.close_btn = QPushButton(t("close"))
+        self.close_btn.setProperty("role", "secondary")
+        self.close_btn.setCursor(Qt.PointingHandCursor)
+        self.close_btn.clicked.connect(self.accept)
+        root.addWidget(self.close_btn)
 
         root.addStretch(1)
-
-        # close
-        self.close_btn = QPushButton(t("close"))
-        self.close_btn.clicked.connect(self.accept)
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        btn_row.addWidget(self.close_btn)
-        root.addLayout(btn_row)
 
     def retranslate(self):
         try:
             self.setWindowTitle(t("about_title"))
+            self.set_title(t("about_title"))
             self.version_label.setText(
                 t("about_version_label", version=APP_VERSION))
             self.dev_label.setText(t("about_developed_by"))

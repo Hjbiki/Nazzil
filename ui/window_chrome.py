@@ -461,9 +461,8 @@ class DialogTitleBar(QWidget):
         lay.setSpacing(8)
 
         self.title_label = QLabel(title, self)
-        self.title_label.setStyleSheet(
-            "color: #D0D6E0; font-size: 13px; font-weight: 500;"
-            " letter-spacing: -0.15px;")
+        # Styled via QSS (#DialogTitleText) so it follows the active theme.
+        self.title_label.setObjectName("DialogTitleText")
         lay.addWidget(self.title_label, 0, Qt.AlignVCenter | Qt.AlignLeft)
 
         self.drag_area = DragArea(self)

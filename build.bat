@@ -13,6 +13,9 @@ if not exist assets\icon.png (
     python generate_icon.py
 )
 
+echo Fetching bundled tools (ffmpeg / aria2c)...
+python fetch_binaries.py
+
 pyinstaller nazzil.spec
 if errorlevel 1 (
     echo Build failed.

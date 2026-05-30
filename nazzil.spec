@@ -40,6 +40,15 @@ if os.path.isdir(_fonts_dir):
                   + glob.glob(os.path.join(_fonts_dir, "*.otf"))):
         _datas.append((_font, os.path.join("assets", "fonts")))
 
+# NOTE: the external tools (ffmpeg/ffprobe/aria2c) are intentionally NOT
+# embedded here — that would bloat the one-file portable exe and slow every
+# launch (it would re-extract them each time). Instead:
+#   • NazzilSetup.exe ships them next to the installed exe (installer.iss) →
+#     fully offline for normal users, the recommended download.
+#   • The lean portable Nazzil.exe fetches them silently on first run
+#     (binaries.ensure_binaries_async) as a fallback.
+# binaries._bundled_dirs() finds the installed copy at <exe_dir>/assets/bin.
+
 
 a = Analysis(
     ['main.py'],

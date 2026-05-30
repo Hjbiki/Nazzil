@@ -21,12 +21,14 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox,
                                QVBoxLayout, QWidget)
 import yt_dlp
 
-from config import (APP_VERSION, DOWNLOADS_PATH, PREVIEW_H, PREVIEW_W,
-                    YT_PLAYLIST_RE, YT_URL_RE, load_config, save_config)
+from config import (APP_VERSION, DOWNLOADS_PATH, MEDIA_URL_RE, PREVIEW_H,
+                    PREVIEW_W, URL_RE, YT_PLAYLIST_RE,
+                    load_config, save_config)
 from downloader import DownloadItem
 from i18n import Translator, t
 from ui.dialogs import (AccountDialog, AboutDialog, SettingsDialog,
-                        conflict_dialog, duplicate_dialog, rename_dialog)
+                        conflict_dialog, duplicate_dialog, rename_dialog,
+                        themed_message)
 from ui.download_row import DownloadRow
 from ui.icons import icon as _icon, isize as _isize
 from ui.tray import Tray
@@ -45,6 +47,12 @@ class _AppBridge(QObject):
     """Used by DownloadItem to ping the App from a worker thread via a
     queued signal."""
     finished_one = Signal()
+
+
+class _ToolsBridge(QObject):
+    """Marshals binaries.ensure_binaries_async's on_done callback (fired on a
+    worker thread) back to the main thread via a queued signal."""
+    done = Signal(bool, bool)   # ffmpeg_ok, aria2c_ok
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +107,7 @@ class App(FramelessMainWindow):
         self.cfg.setdefault("lang", Translator.lang())
         self.cfg.setdefault("per_page", 15)   # 15 | 30 | 50 | 0 (= all)
         self.cfg.setdefault("compact_mode", False)
+        self.cfg.setdefault("theme", "dark")  # "dark" | "light"
 
         # Pagination
         self.page_size = int(self.cfg.get("per_page", 15) or 0)
@@ -137,6 +146,10 @@ class App(FramelessMainWindow):
         # Bridge: worker → main thread for "one finished"
         self._bridge = _AppBridge(self)
         self._bridge.finished_one.connect(self._on_download_finished)
+
+        # Bridge: binaries fetch worker → main thread
+        self._tools_bridge = _ToolsBridge(self)
+        self._tools_bridge.done.connect(self._on_tools_ready)
 
         # ---- UI ----
         self._build_ui()
@@ -679,10 +692,27 @@ class App(FramelessMainWindow):
         # start downloading.
         self.update_banner.hide()
         self._set_update_status("available", tag)
+        # If the user manually clicked "Check for updates", surface a clear
+        # result dialog (not just the silent footer dot) with an action.
+        if getattr(self, "_update_check_manual", False):
+            self._update_check_manual = False
+            clean = (tag or "").lstrip("vV")
+            if themed_message(
+                    self, t("update_check_title"),
+                    t("update_available_msg",
+                      version=f"v{clean}", current=APP_VERSION),
+                    primary=t("update_now"), secondary=t("update_later")):
+                self._on_update_now()
 
     @Slot()
     def _on_no_update(self):
         self._set_update_status("up_to_date")
+        if getattr(self, "_update_check_manual", False):
+            self._update_check_manual = False
+            themed_message(
+                self, t("update_check_title"),
+                t("update_uptodate_msg", version=APP_VERSION),
+                primary=t("close"))
 
     @Slot(str)
     def _on_update_check_failed(self, _msg):
@@ -691,7 +721,11 @@ class App(FramelessMainWindow):
         # network hiccups don't spook the user. The real error already
         # went to stderr from UpdateChecker.
         if getattr(self, "_update_check_manual", False):
+            self._update_check_manual = False
             self._set_update_status("failed")
+            themed_message(
+                self, t("update_check_title"), t("update_failed_msg"),
+                primary=t("close"))
         else:
             self._set_update_status("unknown")
 
@@ -870,6 +904,38 @@ class App(FramelessMainWindow):
         self._apply_window_direction()
         self.retranslate()
 
+    # ==================================================================
+    # Live theme switch (dark / light) — mirrors the language flow.
+    # ==================================================================
+    def set_theme(self, mode: str):
+        mode = mode if mode in ("dark", "light") else "dark"
+        if mode == self.cfg.get("theme", "dark"):
+            return
+        self.cfg["theme"] = mode
+        save_config(self.cfg)
+        from ui.theme import apply_theme
+        app = QApplication.instance()
+        apply_theme(app, mode)
+        self._after_theme_change()
+
+    def _after_theme_change(self):
+        """Re-apply the bits that carry inline (non-QSS) colours so the swap
+        looks complete without a restart. The global stylesheet cascade
+        already restyles everything that uses object-name / role selectors."""
+        try:
+            # Footer status dot colour is status-driven inline — re-assert it.
+            self._set_update_status(self._update_state, self._update_tag)
+        except Exception:
+            pass
+        # Repolish the shell + open dialogs so QSS-driven widgets refresh.
+        for w in [self.window_shell] + list(self.findChildren(QDialog)):
+            try:
+                w.style().unpolish(w)
+                w.style().polish(w)
+                w.update()
+            except Exception:
+                pass
+
     def _apply_window_direction(self):
         """Push the active text direction onto the window + chrome.
         The title bar reorders its brand / right-icons clusters; all
@@ -1045,9 +1111,26 @@ class App(FramelessMainWindow):
             btn.style().polish(btn)
 
     def _check_ffmpeg(self):
-        if shutil.which("ffmpeg") is None:
-            QMessageBox.warning(
-                self, t("ffmpeg_missing_title"), t("ffmpeg_missing_body"))
+        # ffmpeg / aria2c ship bundled (installer) or are fetched silently on
+        # first run (lean portable exe). We NEVER ask the user to install
+        # anything. If anything's missing, show a small non-blocking
+        # "Preparing…" hint (never a frozen window) and fetch in background.
+        import binaries
+        if binaries.have_ffmpeg() and binaries.aria2c_path():
+            return
+        self._set_global(t("preparing_tools"), "muted")
+        binaries.ensure_binaries_async(on_done=self._tools_bridge.done.emit)
+
+    @Slot(bool, bool)
+    def _on_tools_ready(self, ffmpeg_ok, _aria_ok):
+        # Clear the "Preparing…" hint on success; on failure show ONE
+        # friendly bilingual message — never a stack trace, never a
+        # "go install ffmpeg" instruction.
+        if ffmpeg_ok:
+            if self.global_status.text() == t("preparing_tools"):
+                self._set_global("", "")
+        else:
+            self._set_global(t("tools_failed"), "err")
 
     # ==================================================================
     # Cookie opts
@@ -1070,6 +1153,10 @@ class App(FramelessMainWindow):
     def _open_account(self):
         AccountDialog(self, self).exec()
 
+    def _open_shortcuts(self):
+        from ui.dialogs import ShortcutsDialog
+        ShortcutsDialog(self).exec()
+
     # ==================================================================
     # URL handling
     # ==================================================================
@@ -1077,7 +1164,7 @@ class App(FramelessMainWindow):
         if key == "mp3":
             self.quality_combo.clear()
             self.quality_combo.addItems(["320 kbps", "192 kbps", "128 kbps"])
-            self.quality_combo.setCurrentText("192 kbps")
+            self.quality_combo.setCurrentText("320 kbps")
         else:
             labels = self._video_quality_labels or ["—"]
             self.quality_combo.clear()
@@ -1090,14 +1177,14 @@ class App(FramelessMainWindow):
             self.options_card.hide()
             self.playlist_card.hide()
         self._autofetch_timer.stop()
-        if YT_URL_RE.match(url) and url != self.fetched_url:
+        if URL_RE.match(url) and url != self.fetched_url:
             self._autofetch_timer.start(500)
 
     def _autofetch(self):
         url = self.url_entry.text().strip()
         if not url or url == self.fetched_url:
             return
-        if not YT_URL_RE.match(url):
+        if not URL_RE.match(url):
             return
         if not self.fetch_btn.isEnabled():
             return
@@ -1241,7 +1328,7 @@ class App(FramelessMainWindow):
             self.pl_quality_combo.clear()
             self.pl_quality_combo.addItems(
                 ["320 kbps", "192 kbps", "128 kbps"])
-            self.pl_quality_combo.setCurrentText("192 kbps")
+            self.pl_quality_combo.setCurrentText("320 kbps")
         else:
             self.pl_quality_combo.clear()
             self.pl_quality_combo.addItems(
@@ -1265,12 +1352,12 @@ class App(FramelessMainWindow):
         if fmt_key == "mp3":
             fmt, height = "mp3", None
             digits = "".join(ch for ch in q if ch.isdigit())
-            bitrate = int(digits) if digits else 192
+            bitrate = int(digits) if digits else 320
         else:
             fmt = "mp4"
             digits = "".join(ch for ch in q.split("p")[0] if ch.isdigit())
             height = int(digits) if digits else 1080
-            bitrate = 192
+            bitrate = 320
 
         added = 0
         for chk, entry in zip(self.playlist_check_widgets,
@@ -1324,7 +1411,7 @@ class App(FramelessMainWindow):
         q = self.quality_combo.currentText()
         if fmt_key == "mp3":
             digits = "".join(ch for ch in q if ch.isdigit())
-            return "mp3", None, int(digits) if digits else 192
+            return "mp3", None, int(digits) if digits else 320
         height = 1080
         digits = "".join(ch for ch in q.split("p")[0] if ch.isdigit())
         if digits:
@@ -1392,7 +1479,7 @@ class App(FramelessMainWindow):
         self._refresh_list()
 
     def _create_and_start_item(self, url, fmt, height, info, *,
-                               bitrate=192, custom_filename=None):
+                               bitrate=320, custom_filename=None):
         item = DownloadItem(
             url=url, fmt=fmt, height=height, info=info or {},
             folder=self.folder, bitrate=bitrate,
@@ -1520,6 +1607,7 @@ class App(FramelessMainWindow):
         sc("Ctrl+F", lambda: (self.search_entry.setFocus(),
                               self.search_entry.selectAll()))
         sc("Ctrl+V", self._shortcut_paste_url)
+        sc("F1",     self._open_shortcuts)
 
     def _toggle_max_restore(self):
         if self.isMaximized():
@@ -1544,9 +1632,8 @@ class App(FramelessMainWindow):
                 return
         self.url_entry.setFocus()
         self.url_entry.paste()
-        # if it looks like a YouTube URL, kick auto-fetch
-        from config import YT_URL_RE
-        if YT_URL_RE.match(self.url_entry.text().strip()):
+        # if it looks like any URL, kick auto-fetch (yt-dlp handles 1800+ sites)
+        if URL_RE.match(self.url_entry.text().strip()):
             self._fetch()
 
     def _on_search(self, _txt):
@@ -1759,7 +1846,7 @@ class App(FramelessMainWindow):
         if not txt:
             return
         txt = txt.strip()
-        if (YT_URL_RE.match(txt)
+        if (MEDIA_URL_RE.match(txt)
                 and txt != self._last_clip_url
                 and txt != self.url_entry.text().strip()
                 and txt != self.fetched_url):

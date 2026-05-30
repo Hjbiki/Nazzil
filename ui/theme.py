@@ -1,116 +1,177 @@
 # -*- coding: utf-8 -*-
-"""Linear Design System theme for Nazzil.
+"""Linear Design System theme for Nazzil — now with Dark + Light palettes.
 
 Two layers:
-    1. `THEME_QSS` — the global stylesheet applied via `app.setStyleSheet`.
+    1. A QSS template (`_QSS_TEMPLATE`) rendered against a *palette* dict via
+       `build_qss(palette)`. `THEME_QSS` is the dark render kept for the
+       module's historical import. `apply_theme(app, mode)` swaps the live
+       stylesheet AND rebinds the module-level colour constants so any widget
+       built afterwards (dialogs, new rows) uses the active palette.
     2. `apply_shadow(widget, …)` — programmatic QGraphicsDropShadowEffect
-       (Qt's QSS has no box-shadow), called from ui/app.py and
-       ui/download_row.py to add Linear's "glass edge" depth.
+       (Qt's QSS has no box-shadow).
 
-Token reference (see Linear DESIGN.md):
-
-    Surface levels (darker → lighter, ~elevation)
-        L0 #08090A  — window background
-        L1 #0F1011  — main content panel (downloads list)
-        L2 #141516  — cards (download row, format picker, playlist)
-        L3 #1C1C1F  — URL bar area, search bar, settings panels
-        L4 #232326  — hover state on cards, active tab background
-        L5 #28282C  — context menus, dropdowns, tooltips
-
-    Borders (3 strengths, never just one)
-        Primary    #23252A  — standard card / panel boundaries
-        Secondary  #34343A  — strong section dividers
-        Tertiary   #3E3E44  — focused / active panels
-        Input      rgba(255,255,255,0.08)  → flat #2A2D33
-        Focus      #5E6AD2
-
-    Text  #F7F8F8 / #D0D6E0 / #8A8F98 / #62666D
-    Brand #5E6AD2 (hover #828FFF), accent tint rgba(94,106,210,0.18)
-    Status green #27A644, red #EB5757, yellow #F0BF00
-
-Spacing scale (anything not in this list is forbidden):
-    4 · 6 · 8 · 10 · 12 · 16 · 20 · 24 · 40 · 48
+The two palettes share the same KEYS; only the values differ. Code that
+needs a colour at runtime (inline stylesheets) should read it from
+`current()` so it follows the active theme.
 """
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QGraphicsDropShadowEffect
 
 
 # ===========================================================================
-# Raw colour tokens (re-exported so Python can reach them when QSS isn't
-# enough — e.g. QPainter colours or programmatic effect tints).
+# Palettes — every key exists in BOTH dicts (parity matters: apply_theme
+# rebinds all of them as module globals). Dark keeps the exact pre-1.5
+# values so dark mode is visually unchanged.
 # ===========================================================================
+DARK = {
+    # Surface levels
+    "L0": "#101112", "APP_BG": "#101112",
+    "L1": "#0F1011", "PANEL_BG": "#0F1011",
+    "L2": "#141516", "CARD_BG": "#141516",
+    "L3": "#1C1C1F", "SURF_2": "#1C1C1F",
+    "L4": "#232326", "SURF_3": "#232326",
+    "L5": "#28282C", "SURF_4": "#28282C",
+    # Borders
+    "BORDER": "#23252A",
+    "BORDER_HI": "#34343A",
+    "BORDER_STRONG": "#3E3E44",
+    # Input / overlay
+    "INPUT_BG": "#161719",
+    "INPUT_BG_HOVER": "#1B1C1F",
+    "INPUT_BORDER": "#2A2D33",
+    "TRANSLUCENT_5": "#1A1B1E",
+    "SEC_HOVER": "#1B1C1F",
+    # Brand
+    "ACCENT": "#5E6AD2",
+    "ACCENT_HOV": "#828FFF",
+    "ACCENT_TINT": "#1F2240",
+    "ACCENT_TINT_BORDER": "#525E9E",
+    # Text
+    "TEXT": "#F7F8F8",
+    "TEXT_DIM": "#D0D6E0",
+    "TEXT_MUTED": "#8A8F98",
+    "TEXT_FAINT": "#62666D",
+    # Status
+    "OK": "#27A644",
+    "ERR": "#EB5757",
+    "WARN": "#F0BF00",
+    # ---- Semantic overlay tokens (V2 chrome) ----
+    "SHELL_TOP": "#151617",
+    "SHELL_BOTTOM": "#101112",
+    "SHELL_BORDER": "#1F2024",
+    "DIVIDER": "rgba(255, 255, 255, 0.04)",
+    "OVER_HOVER": "rgba(255, 255, 255, 0.04)",
+    "OVER_HOVER_2": "rgba(255, 255, 255, 0.05)",
+    "FILL_FIELD": "rgba(255, 255, 255, 0.04)",
+    "FILL_FIELD_BORDER": "rgba(255, 255, 255, 0.08)",
+    "ROW_BG": "rgba(255, 255, 255, 0.02)",
+    "ROW_BG_HOVER": "rgba(255, 255, 255, 0.04)",
+    "ROW_BORDER": "rgba(255, 255, 255, 0.06)",
+    "ROW_BORDER_HOVER": "rgba(255, 255, 255, 0.1)",
+    "ROW_DL_BG": "rgba(94, 106, 210, 0.04)",
+    "ROW_DL_BORDER": "rgba(130, 143, 255, 0.2)",
+    "ROW_FAIL_BORDER": "rgba(235, 87, 87, 0.25)",
+    "PROG_TRACK": "rgba(255, 255, 255, 0.05)",
+    "FOOTER_BG": "rgba(15, 16, 17, 0.6)",
+    "PILL_ACTIVE_BG": "rgba(94, 106, 210, 0.15)",
+    "PILL_ACTIVE_FG": "#828FFF",
+    "PILL_ACTIVE_BORDER": "rgba(130, 143, 255, 0.4)",
+    "DUR_BADGE_BG": "rgba(8, 9, 10, 0.85)",
+    "META_DL": "#828FFF",
+}
 
-# Surface levels
-L0 = APP_BG       = "#101112"
-L1 = PANEL_BG     = "#0F1011"
-L2 = CARD_BG      = "#141516"
-L3 = SURF_2       = "#1C1C1F"
-L4 = SURF_3       = "#232326"
-L5 = SURF_4       = "#28282C"
+LIGHT = {
+    # Surface levels — soft off-white base, white panels.
+    "L0": "#F7F8FA", "APP_BG": "#F7F8FA",
+    "L1": "#FFFFFF", "PANEL_BG": "#FFFFFF",
+    "L2": "#FFFFFF", "CARD_BG": "#FFFFFF",
+    "L3": "#F2F3F5", "SURF_2": "#F2F3F5",
+    "L4": "#ECEDF0", "SURF_3": "#ECEDF0",
+    "L5": "#FFFFFF", "SURF_4": "#FFFFFF",
+    # Borders
+    "BORDER": "#E3E5EA",
+    "BORDER_HI": "#D5D8DE",
+    "BORDER_STRONG": "#C2C6CE",
+    # Input / overlay
+    "INPUT_BG": "#FFFFFF",
+    "INPUT_BG_HOVER": "#F2F3F5",
+    "INPUT_BORDER": "#DDE0E5",
+    "TRANSLUCENT_5": "#F2F3F5",
+    "SEC_HOVER": "#F2F3F5",
+    # Brand (darker hover since text on accent is white)
+    "ACCENT": "#5E6AD2",
+    "ACCENT_HOV": "#4F5BC4",
+    "ACCENT_TINT": "#EEF0FB",
+    "ACCENT_TINT_BORDER": "#C3C9F0",
+    # Text — near-black scale
+    "TEXT": "#1C1D21",
+    "TEXT_DIM": "#3A3D44",
+    "TEXT_MUTED": "#6B7280",
+    "TEXT_FAINT": "#9CA1AB",
+    # Status (slightly darkened for contrast on white)
+    "OK": "#1F9E3D",
+    "ERR": "#D63B3B",
+    "WARN": "#B8860B",
+    # ---- Semantic overlay tokens ----
+    "SHELL_TOP": "#FFFFFF",
+    "SHELL_BOTTOM": "#F3F4F7",
+    "SHELL_BORDER": "#E3E5EA",
+    "DIVIDER": "rgba(0, 0, 0, 0.06)",
+    "OVER_HOVER": "rgba(0, 0, 0, 0.04)",
+    "OVER_HOVER_2": "rgba(0, 0, 0, 0.05)",
+    "FILL_FIELD": "#FFFFFF",
+    "FILL_FIELD_BORDER": "#DDE0E5",
+    "ROW_BG": "#FFFFFF",
+    "ROW_BG_HOVER": "#F4F5F8",
+    "ROW_BORDER": "#E6E8EC",
+    "ROW_BORDER_HOVER": "#D5D8DE",
+    "ROW_DL_BG": "rgba(94, 106, 210, 0.08)",
+    "ROW_DL_BORDER": "rgba(94, 106, 210, 0.35)",
+    "ROW_FAIL_BORDER": "rgba(214, 59, 59, 0.4)",
+    "PROG_TRACK": "rgba(0, 0, 0, 0.08)",
+    "FOOTER_BG": "rgba(244, 245, 248, 0.7)",
+    "PILL_ACTIVE_BG": "rgba(94, 106, 210, 0.12)",
+    "PILL_ACTIVE_FG": "#4F5BC4",
+    "PILL_ACTIVE_BORDER": "rgba(94, 106, 210, 0.4)",
+    "DUR_BADGE_BG": "rgba(0, 0, 0, 0.65)",
+    "META_DL": "#4F5BC4",
+}
 
-# Borders
-BORDER            = "#23252A"   # primary
-BORDER_HI         = "#34343A"   # secondary
-BORDER_STRONG     = "#3E3E44"   # tertiary
+_PALETTES = {"dark": DARK, "light": LIGHT}
 
-# Input / overlay (flattened from rgba over near-black, kept as solid
-# hex so QSS renders identically to the rgba intent)
-INPUT_BG          = "#161719"   # ~ rgba(255,255,255,0.03)
-INPUT_BG_HOVER    = "#1B1C1F"   # ~ rgba(255,255,255,0.07)
-INPUT_BORDER      = "#2A2D33"   # ~ rgba(255,255,255,0.08)
-TRANSLUCENT_5     = "#1A1B1E"   # ~ rgba(255,255,255,0.05)
-SEC_HOVER         = INPUT_BG_HOVER
+# Active palette — read by inline-styled widgets via current().
+_active = DARK
 
-# Brand
-ACCENT            = "#5E6AD2"
-ACCENT_HOV        = "#828FFF"
-ACCENT_TINT       = "#1F2240"   # ~ rgba(94,106,210,0.18) over L0
-ACCENT_TINT_BORDER = "#525E9E"  # ~ rgba(130,143,255,0.4)
 
-# Text
-TEXT              = "#F7F8F8"
-TEXT_DIM          = "#D0D6E0"
-TEXT_MUTED        = "#8A8F98"
-TEXT_FAINT        = "#62666D"
+def current() -> dict:
+    """The palette dict currently in effect."""
+    return _active
 
-# Status
-OK                = "#27A644"
-ERR               = "#EB5757"
-WARN              = "#F0BF00"
+
+def palette_for(mode: str) -> dict:
+    return _PALETTES.get(mode, DARK)
+
+
+# ---------------------------------------------------------------------------
+# Module-level colour constants (bound to the dark palette at import; rebound
+# by apply_theme). Kept so existing `from ui.theme import L1, ACCENT, …`
+# imports keep working.
+# ---------------------------------------------------------------------------
+def _bind_globals(palette: dict):
+    globals().update(palette)
+
+
+_bind_globals(DARK)
 
 
 # ===========================================================================
-# Object names + role properties (canonical so QSS selectors don't drift)
+# Stylesheet template — {{ }} are literal CSS braces; {TOKEN} placeholders
+# are filled from the palette via str.format(**palette).
 # ===========================================================================
-#   #PanelMain      — main downloads panel (L1)
-#   #PanelCard      — options/playlist cards (L2)
-#   #DownloadRow    — single download row (L2)
-#   #UrlPill        — top URL bar wrapper (L3)
-#   #UrlEntry       — line edit inside UrlPill
-#   #SearchEntry    — downloads list search (L3)
-#   #UpdateBanner   — top-of-window update banner
-#   #BottomStatusBar— footer bar with version + dot
-#   #ThumbBox / #PreviewBox  — image holders
-#   #DurationBadge  — overlay chip on thumbnails
-#   #SectionHeader / #Hint / #StatusLabel / #MetaLabel / #TitleLabel
-#                   / #FetchedTitle — typed labels
-#   QPushButton[role=
-#       "primary" | "secondary" | "danger" | "icon" |
-#       "tab" | "tabActive" | "kebab" | "kebabDanger"]
-#   QLabel[role="badge" | "badgeActive"]
-#   QCheckBox[role="switch"]
-
-
-# ===========================================================================
-# Stylesheet
-# ===========================================================================
-
-THEME_QSS = f"""
+_QSS_TEMPLATE = """
 /* ===========================================================
-   Base — Thmanyah Sans first (loaded from assets/fonts at
-   startup), then OS Arabic/Latin fallbacks.
+   Base — Thmanyah Sans first, then OS Arabic/Latin fallbacks.
    =========================================================== */
 QWidget {{
     background: {L0};
@@ -125,24 +186,18 @@ QWidget {{
 QMainWindow {{ background: {L0}; }}
 
 /* ===========================================================
-   Surfaces — six distinct elevation levels
+   Surfaces
    =========================================================== */
-
-/* L1 — the main downloads panel */
 QFrame#PanelMain {{
     background: {L1};
     border: 1px solid {BORDER};
     border-radius: 16px;
 }}
-
-/* L2 — options + playlist cards (sit on top of L0/L1) */
 QFrame#PanelCard {{
     background: {L2};
     border: 1px solid {BORDER};
     border-radius: 16px;
 }}
-
-/* L2 — individual download row */
 QFrame#DownloadRow {{
     background: {L2};
     border: 1px solid {BORDER};
@@ -152,22 +207,17 @@ QFrame#DownloadRow:hover {{
     background: {L4};
     border-color: {BORDER_HI};
 }}
-
-/* Translucent inner panels — header strips inside a card */
 QFrame#FrostedHeader {{
     background: {TRANSLUCENT_5};
     border: 1px solid {INPUT_BORDER};
     border-radius: 12px;
 }}
-
-/* Thumbnail / preview holders */
 QFrame#ThumbBox,
 QFrame#PreviewBox {{
     background: {INPUT_BG};
     border: 1px solid {INPUT_BORDER};
     border-radius: 8px;
 }}
-
 QLabel#DurationBadge {{
     background: black;
     color: white;
@@ -253,8 +303,7 @@ QLineEdit#SearchEntry {{
 QLineEdit#SearchEntry:focus {{ border-color: {ACCENT}; }}
 
 /* ===========================================================
-   Buttons — pill-shaped, no fixed height in Python.
-   Secondary is the default; role=primary/danger/icon/tab override.
+   Buttons
    =========================================================== */
 QPushButton {{
     background: {INPUT_BG};
@@ -269,7 +318,6 @@ QPushButton {{
 QPushButton:hover    {{ background: {INPUT_BG_HOVER}; }}
 QPushButton:disabled {{ color: {TEXT_FAINT}; }}
 
-/* Primary — brand-coloured */
 QPushButton[role="primary"] {{
     background: {ACCENT};
     color: white;
@@ -282,19 +330,16 @@ QPushButton[role="primary"] {{
 QPushButton[role="primary"]:hover   {{ background: {ACCENT_HOV}; }}
 QPushButton[role="primary"]:pressed {{ background: {ACCENT}; }}
 
-/* Secondary — explicit class for the few call sites that set role */
 QPushButton[role="secondary"] {{
     background: {INPUT_BG};
     color: {TEXT};
     border: 1px solid {INPUT_BORDER};
 }}
 
-/* Danger tint (text colour only) */
 QPushButton[role="danger"] {{
     color: {ERR};
 }}
 
-/* Round icon-only button (settings/account in top bar) */
 QPushButton[role="icon"] {{
     min-width: 40px;
     max-width: 40px;
@@ -305,7 +350,6 @@ QPushButton[role="icon"] {{
     padding: 0;
 }}
 
-/* Kebab + ✕ on each row */
 QPushButton[role="kebab"] {{
     min-width: 24px;
     max-width: 24px;
@@ -331,7 +375,6 @@ QPushButton[role="kebabDanger"] {{
 }}
 QPushButton[role="kebabDanger"]:hover {{ background: {INPUT_BG_HOVER}; }}
 
-/* Tab-style pushbutton (segmented group) */
 QPushButton[role="tab"] {{
     background: {INPUT_BG};
     color: {TEXT};
@@ -379,7 +422,7 @@ QLabel[role="badgeActive"] {{
 }}
 
 /* ===========================================================
-   ComboBox — inputs
+   ComboBox
    =========================================================== */
 QComboBox {{
     background: {INPUT_BG};
@@ -394,8 +437,6 @@ QComboBox:hover {{ background: {INPUT_BG_HOVER}; }}
 QComboBox:focus {{ border-color: {ACCENT}; }}
 QComboBox::drop-down {{ border: 0; width: 24px; }}
 QComboBox::down-arrow {{ image: none; }}
-
-/* Popup list (L5 — popover surface) */
 QComboBox QAbstractItemView {{
     background: {L5};
     border: 1px solid {BORDER_HI};
@@ -446,7 +487,6 @@ QCheckBox::indicator:checked {{
 }}
 QCheckBox::indicator:hover {{ border-color: {ACCENT_HOV}; }}
 
-/* Switch — implemented as QCheckBox[role="switch"] */
 QCheckBox[role="switch"]::indicator {{
     width: 32px;
     height: 20px;
@@ -457,6 +497,27 @@ QCheckBox[role="switch"]::indicator {{
 QCheckBox[role="switch"]::indicator:checked {{
     background: {ACCENT};
     border-color: {ACCENT};
+}}
+
+/* ===========================================================
+   Radio button
+   =========================================================== */
+QRadioButton {{
+    background: transparent;
+    color: {TEXT_DIM};
+    spacing: 8px;
+    font-weight: 500;
+}}
+QRadioButton::indicator {{
+    width: 16px;
+    height: 16px;
+    border: 1px solid {INPUT_BORDER};
+    background: {INPUT_BG};
+    border-radius: 8px;
+}}
+QRadioButton::indicator:checked {{
+    background: {ACCENT};
+    border: 4px solid {INPUT_BG};
 }}
 
 /* ===========================================================
@@ -493,7 +554,7 @@ QScrollBar::handle:horizontal:hover {{ background: {BORDER_STRONG}; }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 
 /* ===========================================================
-   Menus — L5 popover surface
+   Menus
    =========================================================== */
 QMenu {{
     background: {L5};
@@ -519,13 +580,13 @@ QMenu::separator {{
 }}
 
 /* ===========================================================
-   Dialogs — settings panel surface (L3)
+   Dialogs
    =========================================================== */
 QDialog {{ background: {L3}; }}
 QDialog QLabel {{ background: transparent; }}
 
 /* ===========================================================
-   Tooltips — L5 popover
+   Tooltips
    =========================================================== */
 QToolTip {{
     background: {L5};
@@ -538,19 +599,13 @@ QToolTip {{
 /* ===========================================================
    Frameless window chrome
    =========================================================== */
-
-/* Rounded window shell — subtle diagonal gradient for depth.
-   The window is clipped to a 12 px rounded rectangle by the
-   FramelessMainWindow / FramelessDialog mask. The border + radius here
-   give the visible edge polish. Same shell QSS applies to dialogs
-   (SettingsDialog, AccountDialog) so they match the main window. */
 QFrame#WindowShell {{
     background: qlineargradient(
         x1:0, y1:0, x2:1, y2:1,
-        stop:0 #151617,
-        stop:1 #101112
+        stop:0 {SHELL_TOP},
+        stop:1 {SHELL_BOTTOM}
     );
-    border: 1px solid #1F2024;
+    border: 1px solid {SHELL_BORDER};
     border-radius: 12px;
 }}
 
@@ -558,15 +613,25 @@ QWidget#TitleBar {{
     background: transparent;
 }}
 
-/* ----- URL bar row (under the title bar) ----- */
+/* Dialog title-bar text (FramelessDialog) — palette-driven so it follows
+   a live theme switch. */
+QLabel#DialogTitleText {{
+    color: {TEXT_DIM};
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: -0.15px;
+    background: transparent;
+}}
+
+/* ----- URL bar row ----- */
 QFrame#UrlRow {{
     background: transparent;
     border: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid {DIVIDER};
 }}
 QLineEdit#UrlEntryV2 {{
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: {FILL_FIELD};
+    border: 1px solid {FILL_FIELD_BORDER};
     border-radius: 8px;
     padding: 0 12px;
     min-height: 40px;
@@ -592,7 +657,7 @@ QPushButton#FetchBtnV2:disabled {{ color: rgba(255,255,255,0.5); }}
 QFrame#FilterRow {{
     background: transparent;
     border: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid {DIVIDER};
 }}
 QPushButton[role="pill"] {{
     background: transparent;
@@ -605,13 +670,13 @@ QPushButton[role="pill"] {{
     font-weight: 500;
 }}
 QPushButton[role="pill"]:hover {{
-    background: rgba(255, 255, 255, 0.04);
+    background: {OVER_HOVER};
     color: {TEXT_DIM};
 }}
 QPushButton[role="pillActive"] {{
-    background: rgba(94, 106, 210, 0.15);
-    color: #828FFF;
-    border: 1px solid rgba(130, 143, 255, 0.4);
+    background: {PILL_ACTIVE_BG};
+    color: {PILL_ACTIVE_FG};
+    border: 1px solid {PILL_ACTIVE_BORDER};
     border-radius: 6px;
     padding: 0 12px;
     min-height: 24px;
@@ -631,11 +696,10 @@ QPushButton[role="pillIcon"] {{
     padding: 0;
 }}
 QPushButton[role="pillIcon"]:hover {{
-    background: rgba(255, 255, 255, 0.04);
+    background: {OVER_HOVER};
     color: {TEXT_DIM};
 }}
 
-/* Danger-tinted icon button (Clear all in filter row) */
 QPushButton[role="clearDanger"] {{
     background: rgba(235, 87, 87, 0.08);
     color: {ERR};
@@ -654,8 +718,8 @@ QPushButton[role="clearDanger"]:hover {{
 }}
 
 QLineEdit#SearchEntryCompact {{
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: {FILL_FIELD};
+    border: 1px solid {FILL_FIELD_BORDER};
     border-radius: 6px;
     padding: 0 12px 0 32px;
     min-height: 32px;
@@ -674,26 +738,26 @@ QComboBox#SortCompact {{
     font-size: 11px;
     font-weight: 500;
 }}
-QComboBox#SortCompact:hover {{ background: rgba(255,255,255,0.04); }}
+QComboBox#SortCompact:hover {{ background: {OVER_HOVER}; }}
 QComboBox#SortCompact::drop-down {{ border: 0; width: 12px; }}
 QComboBox#SortCompact::down-arrow {{ image: none; }}
 
 /* ----- Download row v2 ----- */
 QFrame#RowV2 {{
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: {ROW_BG};
+    border: 1px solid {ROW_BORDER};
     border-radius: 8px;
 }}
 QFrame#RowV2:hover {{
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(255, 255, 255, 0.1);
+    background: {ROW_BG_HOVER};
+    border-color: {ROW_BORDER_HOVER};
 }}
 QFrame#RowV2[state="downloading"] {{
-    background: rgba(94, 106, 210, 0.04);
-    border-color: rgba(130, 143, 255, 0.2);
+    background: {ROW_DL_BG};
+    border-color: {ROW_DL_BORDER};
 }}
 QFrame#RowV2[state="failed"] {{
-    border-color: rgba(235, 87, 87, 0.25);
+    border-color: {ROW_FAIL_BORDER};
 }}
 
 QFrame#RowV2 QFrame#ThumbBoxV2 {{
@@ -702,7 +766,7 @@ QFrame#RowV2 QFrame#ThumbBoxV2 {{
     border: 0;
 }}
 QLabel#DurationBadgeV2 {{
-    background: rgba(8, 9, 10, 0.85);
+    background: {DUR_BADGE_BG};
     color: {TEXT_DIM};
     border-radius: 3px;
     padding: 0 4px;
@@ -727,7 +791,7 @@ QLabel#MetaV2 {{
     font-size: 12px;
     font-weight: 500;
 }}
-QLabel#MetaV2[state="downloading"] {{ color: #828FFF; }}
+QLabel#MetaV2[state="downloading"] {{ color: {META_DL}; }}
 QLabel#MetaV2[state="err"]         {{ color: {ERR}; }}
 
 /* Tags on the channel line */
@@ -743,7 +807,7 @@ QLabel[role="tagYouTube"] {{
 }}
 QLabel[role="tagFormat"] {{
     background: rgba(94, 106, 210, 0.12);
-    color: #828FFF;
+    color: {PILL_ACTIVE_FG};
     border: 1px solid rgba(130, 143, 255, 0.25);
     border-radius: 3px;
     padding: 0 6px;
@@ -762,9 +826,6 @@ QLabel[role="tagAudio"] {{
     font-weight: 500;
 }}
 
-/* Row action buttons — final 30×30 with 1 px border.
-   QSS adds borders on top of min-width/min-height in Qt, so we set
-   content to 28 px → total 30 px. */
 QPushButton[role="rowAction"] {{
     background: transparent;
     color: {TEXT_MUTED};
@@ -778,7 +839,7 @@ QPushButton[role="rowAction"] {{
     padding: 0;
 }}
 QPushButton[role="rowAction"]:hover {{
-    background: rgba(255, 255, 255, 0.05);
+    background: {OVER_HOVER_2};
     color: {TEXT};
 }}
 QPushButton[role="rowActionDanger"] {{
@@ -797,9 +858,8 @@ QPushButton[role="rowActionDanger"]:hover {{
     background: rgba(235, 87, 87, 0.15);
 }}
 
-/* Row progress bar — slimmer than the global default */
 QProgressBar#RowProgressV2 {{
-    background: rgba(255, 255, 255, 0.05);
+    background: {PROG_TRACK};
     border: 0;
     border-radius: 1px;
     min-height: 2px;
@@ -837,7 +897,7 @@ QPushButton[role="pageBtn"] {{
     padding: 0;
 }}
 QPushButton[role="pageBtn"]:hover {{
-    background: rgba(255, 255, 255, 0.05);
+    background: {OVER_HOVER_2};
     color: {TEXT};
 }}
 QPushButton[role="pageBtnActive"] {{
@@ -856,9 +916,9 @@ QPushButton[role="pageBtnActive"] {{
 
 /* ----- Bottom footer strip ----- */
 QFrame#FooterStrip {{
-    background: rgba(15, 16, 17, 0.6);
+    background: {FOOTER_BG};
     border: 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    border-top: 1px solid {DIVIDER};
 }}
 QLabel#FooterText {{
     color: {TEXT_FAINT};
@@ -868,22 +928,37 @@ QLabel#FooterText {{
 """
 
 
+def build_qss(palette: dict) -> str:
+    """Render the QSS template against a palette dict."""
+    return _QSS_TEMPLATE.format(**palette)
+
+
+def qss_for(mode: str) -> str:
+    return build_qss(palette_for(mode))
+
+
+# Dark render kept under the historical name (main.py imports THEME_QSS).
+THEME_QSS = build_qss(DARK)
+
+
+def apply_theme(app, mode: str) -> str:
+    """Swap the live application theme. Rebinds the module colour constants
+    so widgets built afterwards pick up the new palette, then sets the
+    stylesheet. Returns the mode actually applied."""
+    global _active
+    mode = mode if mode in _PALETTES else "dark"
+    _active = _PALETTES[mode]
+    _bind_globals(_active)
+    if app is not None:
+        app.setStyleSheet(build_qss(_active))
+    return mode
+
+
 # ===========================================================================
-# Shadows — programmatic, since QSS has no box-shadow.
+# Shadows
 # ===========================================================================
 def apply_shadow(widget, blur=12, color=(0, 0, 0, 40), x=0, y=3):
-    """Attach a QGraphicsDropShadowEffect to `widget`.
-
-    Linear's "glass edge" depth comes from soft shadows under elevated
-    surfaces combined with the fine 1 px borders. Numbers chosen to match
-    the spec recipes:
-
-        Main panel        blur=12 alpha=40 offset=(0,3)
-        Format card       blur=10 alpha=35 offset=(0,2)
-        URL bar           blur= 8 alpha=30 offset=(0,2)
-        Download row      blur= 4 alpha=20 offset=(0,1)
-        Popovers          blur=32 alpha=90 offset=(0,7)
-    """
+    """Attach a QGraphicsDropShadowEffect to `widget`."""
     eff = QGraphicsDropShadowEffect(widget)
     eff.setBlurRadius(blur)
     r, g, b, a = color
@@ -893,12 +968,8 @@ def apply_shadow(widget, blur=12, color=(0, 0, 0, 40), x=0, y=3):
     return eff
 
 
-# Convenient named recipes
 SHADOW_PANEL  = dict(blur=12, color=(0, 0, 0, 40), x=0, y=3)
 SHADOW_CARD   = dict(blur=10, color=(0, 0, 0, 35), x=0, y=2)
 SHADOW_INPUT  = dict(blur=8,  color=(0, 0, 0, 30), x=0, y=2)
 SHADOW_ROW    = dict(blur=4,  color=(0, 0, 0, 20), x=0, y=1)
 SHADOW_POPUP  = dict(blur=32, color=(0, 0, 0, 90), x=0, y=7)
-
-
-# (The blur-fallback override was removed — the shell is always solid.)

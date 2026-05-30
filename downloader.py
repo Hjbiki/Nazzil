@@ -4,7 +4,6 @@
 
 import os
 import re
-import shutil
 import threading
 from datetime import datetime
 from urllib.parse import urlparse
@@ -12,6 +11,7 @@ from urllib.parse import urlparse
 from PySide6.QtCore import QObject, Signal
 import yt_dlp
 
+import binaries
 from i18n import t
 from utils import (clean_error, classify_error, file_size,
                    sanitize_filename)
@@ -50,7 +50,7 @@ class DownloadItem(QObject):
     download_finished = Signal()
 
     def __init__(self, url, fmt, height, info, folder, *,
-                 bitrate=192, status="queued", filepath="",
+                 bitrate=320, status="queued", filepath="",
                  error_msg="", size_bytes=0, size_on_disk=0,
                  custom_filename=None, added_at=None,
                  extractor=None, webpage_url_domain=None, parent=None):
@@ -233,10 +233,18 @@ class DownloadItem(QObject):
         auto_retried = False
 
         use_aria2c = bool(self.app.cfg.get("use_aria2c", False)) if self.app else False
-        aria2c_available = shutil.which("aria2c") is not None
-        if use_aria2c and not aria2c_available:
-            self.progress_updated.emit(0, t("row_aria2c_fallback"))
+        # aria2c ships bundled with the app (binaries.aria2c_path); fall back
+        # silently to the default downloader if for some reason it isn't
+        # present. No user-facing "not found" message — that's our problem,
+        # not theirs.
+        aria2c_exe = binaries.aria2c_path()
+        if use_aria2c and not aria2c_exe:
             use_aria2c = False
+
+        # ffmpeg / ffprobe are bundled too. Hand yt-dlp the directory so its
+        # post-processors (Merger / ExtractAudio / EmbedThumbnail / Metadata)
+        # use our copy instead of relying on the system PATH.
+        ffmpeg_dir = binaries.ffmpeg_dir()
 
         def build_opts():
             opts = {
@@ -251,9 +259,12 @@ class DownloadItem(QObject):
                 "retries": 5,
                 "fragment_retries": 5,
             }
+            if ffmpeg_dir:
+                opts["ffmpeg_location"] = ffmpeg_dir
             opts.update(cookie_opts)
             if use_aria2c:
-                opts["external_downloader"] = "aria2c"
+                # Point yt-dlp at the bundled aria2c binary explicitly.
+                opts["external_downloader"] = {"default": aria2c_exe}
                 opts["external_downloader_args"] = {
                     "aria2c": ["-x", "16", "-s", "16", "-k", "1M",
                                "--summary-interval=1",
@@ -266,7 +277,7 @@ class DownloadItem(QObject):
                     {
                         "key": "FFmpegExtractAudio",
                         "preferredcodec": "mp3",
-                        "preferredquality": str(self.bitrate or 192),
+                        "preferredquality": str(self.bitrate or 320),
                     },
                     {"key": "FFmpegMetadata", "add_metadata": True},
                     {"key": "EmbedThumbnail", "already_have_thumbnail": False},
@@ -484,7 +495,7 @@ class DownloadItem(QObject):
             error_msg=d.get("error_msg", ""),
             size_bytes=d.get("size_bytes", 0),
             size_on_disk=d.get("size_on_disk", 0),
-            bitrate=d.get("bitrate", 192),
+            bitrate=d.get("bitrate", 320),
             custom_filename=d.get("custom_filename"),
             added_at=d.get("added_at"),
             extractor=extractor,

@@ -41,15 +41,24 @@ from utils import (fetch_image_bytes, fmt_duration, human_size,
 # extractor not in the map.
 # ---------------------------------------------------------------------------
 KNOWN_SOURCES = {
-    "youtube":    ("YouTube",    "#FF6B6B", "rgba(235,87,87,0.12)",  "rgba(235,87,87,0.3)"),
-    "twitter":    ("X",          "#1DA1F2", "rgba(29,161,242,0.12)", "rgba(29,161,242,0.3)"),
-    "vimeo":      ("Vimeo",      "#1AB7EA", "rgba(26,183,234,0.12)", "rgba(26,183,234,0.3)"),
-    "twitch":     ("Twitch",     "#9146FF", "rgba(145,70,255,0.12)", "rgba(145,70,255,0.3)"),
-    "tiktok":     ("TikTok",     "#FE2C55", "rgba(254,44,85,0.12)",  "rgba(254,44,85,0.3)"),
-    "instagram":  ("Instagram",  "#E1306C", "rgba(225,48,108,0.12)", "rgba(225,48,108,0.3)"),
-    "facebook":   ("Facebook",   "#1877F2", "rgba(24,119,242,0.12)", "rgba(24,119,242,0.3)"),
-    "reddit":     ("Reddit",     "#FF4500", "rgba(255,69,0,0.12)",   "rgba(255,69,0,0.3)"),
-    "soundcloud": ("SoundCloud", "#FF7700", "rgba(255,119,0,0.12)",  "rgba(255,119,0,0.3)"),
+    "youtube":     ("YouTube",     "#FF6B6B", "rgba(235,87,87,0.12)",  "rgba(235,87,87,0.3)"),
+    "twitter":     ("X",           "#1DA1F2", "rgba(29,161,242,0.12)", "rgba(29,161,242,0.3)"),
+    "vimeo":       ("Vimeo",       "#1AB7EA", "rgba(26,183,234,0.12)", "rgba(26,183,234,0.3)"),
+    "twitch":      ("Twitch",      "#9146FF", "rgba(145,70,255,0.12)", "rgba(145,70,255,0.3)"),
+    "tiktok":      ("TikTok",      "#FE2C55", "rgba(254,44,85,0.12)",  "rgba(254,44,85,0.3)"),
+    "instagram":   ("Instagram",   "#E1306C", "rgba(225,48,108,0.12)", "rgba(225,48,108,0.3)"),
+    "facebook":    ("Facebook",    "#1877F2", "rgba(24,119,242,0.12)", "rgba(24,119,242,0.3)"),
+    "reddit":      ("Reddit",      "#FF4500", "rgba(255,69,0,0.12)",   "rgba(255,69,0,0.3)"),
+    "soundcloud":  ("SoundCloud",  "#FF7700", "rgba(255,119,0,0.12)",  "rgba(255,119,0,0.3)"),
+    "dailymotion": ("Dailymotion", "#0066DC", "rgba(0,102,220,0.12)",  "rgba(0,102,220,0.3)"),
+    "bilibili":    ("Bilibili",    "#00A1D6", "rgba(0,161,214,0.12)",  "rgba(0,161,214,0.3)"),
+    "kick":        ("Kick",        "#53FC18", "rgba(83,252,24,0.12)",  "rgba(83,252,24,0.35)"),
+    "rumble":      ("Rumble",      "#85C742", "rgba(133,199,66,0.12)", "rgba(133,199,66,0.3)"),
+    "pinterest":   ("Pinterest",   "#E60023", "rgba(230,0,35,0.12)",   "rgba(230,0,35,0.3)"),
+    "niconico":    ("Niconico",    "#E6E6E6", "rgba(120,120,120,0.14)", "rgba(120,120,120,0.3)"),
+    "vk":          ("VK",          "#4C75A3", "rgba(76,117,163,0.12)", "rgba(76,117,163,0.3)"),
+    "streamable":  ("Streamable",  "#0F90FA", "rgba(15,144,250,0.12)", "rgba(15,144,250,0.3)"),
+    "odnoklassniki": ("OK",        "#EE8208", "rgba(238,130,8,0.12)",  "rgba(238,130,8,0.3)"),
 }
 
 _NEUTRAL_TAG = ("#8A8F98", "rgba(255,255,255,0.04)", "rgba(255,255,255,0.08)")
@@ -95,10 +104,11 @@ ACTION_ICON_SIZE = 16
 # format · size / progress / error), compact rows hide channel + error.
 ROW_MIN_COMF = 104
 ROW_MIN_COMP = 68
-# Action-cluster widget width — two 30 px buttons + 6 px gap, plus a
-# couple of pixels of breathing room. Locked at Fixed + min/max so the
-# cluster never shrinks; the title elides instead.
-ACTIONS_WIDTH = 72
+# Action-cluster widget width — up to three 30 px buttons (play / folder /
+# kebab on completed rows) + 6 px gaps, plus a couple of pixels of breathing
+# room. Locked at Fixed + min/max so the cluster never shrinks; the title
+# elides instead.
+ACTIONS_WIDTH = 108
 
 
 class _ElidingLabel(QLabel):
@@ -234,13 +244,9 @@ class DownloadRow(QFrame):
             self.thumb_label.setStyleSheet(
                 "color: #62666D; font-size: 14px; background: transparent;")
 
-        if self.item.duration:
-            self._badge = QLabel(fmt_duration(self.item.duration),
-                                 self.thumb_box)
-            self._badge.setObjectName("DurationBadgeV2")
-            self._badge.adjustSize()
-            self._badge.move(tw - self._badge.width() - 4,
-                             th - self._badge.height() - 4)
+        # Duration is intentionally NOT drawn over the thumbnail anymore —
+        # it would cover part of the image. It now lives on the meta line
+        # (see self.dur_label below).
         outer.addWidget(self.thumb_box, 0, Qt.AlignTop)
 
         # ---- middle column: structured info block ----
@@ -294,6 +300,15 @@ class DownloadRow(QFrame):
         self.tag_format.setProperty("role",
                                     "tagAudio" if is_audio else "tagFormat")
         meta_lay.addWidget(self.tag_format, 0, Qt.AlignVCenter)
+
+        # Duration — moved here off the thumbnail. A small clock glyph +
+        # the time, in muted meta colour. Hidden when duration is unknown.
+        self._sep_dur = self._meta_dot()
+        meta_lay.addWidget(self._sep_dur, 0, Qt.AlignVCenter)
+        self.dur_label = QLabel("", self.line_meta)
+        self.dur_label.setObjectName("MetaV2")
+        meta_lay.addWidget(self.dur_label, 0, Qt.AlignVCenter)
+        self._set_duration_label()
 
         self._sep2 = self._meta_dot()
         meta_lay.addWidget(self._sep2, 0, Qt.AlignVCenter)
@@ -383,6 +398,15 @@ class DownloadRow(QFrame):
             return f"MP4 · {self.item.height}p"
         return "MP4"
 
+    def _set_duration_label(self):
+        """Populate / show / hide the meta-line duration. Hidden (along with
+        its leading separator) when the duration is unknown."""
+        text = fmt_duration(self.item.duration) if self.item.duration else ""
+        self.dur_label.setText(text)
+        has = bool(text)
+        self.dur_label.setVisible(has)
+        self._sep_dur.setVisible(has)
+
     # ------------------------------------------------------------------
     # Signal wiring
     # ------------------------------------------------------------------
@@ -411,6 +435,7 @@ class DownloadRow(QFrame):
             self.channel_label.setVisible(
                 bool(self.item.uploader) and not self._compact)
             self.tag_format.setText(self._format_tag_text())
+            self._set_duration_label()
             # extractor may have been refreshed during the live download
             self._apply_source_tag()
         except Exception:
@@ -514,10 +539,11 @@ class DownloadRow(QFrame):
         self._action_btns = []
 
         if status == "completed":
-            # [folder] [⋯ more menu]
+            # [▶ play] [folder] [⋯ more menu]
+            self._add_action("play", t("menu_play"), self._open_file)
             self._add_action("folder", t("menu_show_in_folder"),
                              self._show_in_folder)
-            self._add_action("dots", t("menu_play"), self._show_kebab_menu)
+            self._add_action("dots", t("menu_more"), self._show_kebab_menu)
         elif status == "downloading":
             # [✕ cancel]
             self._add_action("close", t("menu_remove"), self.delete,
@@ -544,7 +570,7 @@ class DownloadRow(QFrame):
             b.setIconSize(_isize(ACTION_ICON_SIZE))
         else:
             fallback = {"folder": "📁", "dots": "⋯", "close": "✕",
-                        "refresh": "↻"}.get(icon_name, "•")
+                        "refresh": "↻", "play": "▶"}.get(icon_name, "•")
             b.setText(fallback)
         b.clicked.connect(slot)
         self.actions.layout().addWidget(b)

@@ -58,6 +58,23 @@ YT_PLAYLIST_RE = re.compile(
     r"https?://(?:www\.|m\.)?youtube\.com/playlist\?list=[\w\-]+",
     re.IGNORECASE)
 
+# Generic link — any http(s) URL. yt-dlp supports 1800+ sites, so the Fetch
+# flow is NOT YouTube-only. Used to auto-fetch whatever the user types/pastes
+# into the URL field (they put it there to download it).
+URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+
+# Known media hosts — used for the clipboard watcher so it auto-fills copied
+# *video* links (YouTube, X/Twitter, Instagram, TikTok, …) without grabbing
+# every random URL the user copies. The Fetch button itself accepts any URL.
+MEDIA_URL_RE = re.compile(
+    r"https?://(?:[\w\-]+\.)*"
+    r"(?:youtube\.com|youtu\.be|twitter\.com|x\.com|instagram\.com|"
+    r"tiktok\.com|facebook\.com|fb\.watch|vimeo\.com|twitch\.tv|"
+    r"reddit\.com|dailymotion\.com|dai\.ly|soundcloud\.com|"
+    r"bilibili\.com|nicovideo\.jp|streamable\.com|kick\.com|"
+    r"pinterest\.com|vk\.com|ok\.ru|rumble\.com|odysee\.com)/\S+",
+    re.IGNORECASE)
+
 
 # ---------------------------------------------------------------------------
 # Cookie modes — internal key + i18n label key

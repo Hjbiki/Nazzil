@@ -29,6 +29,9 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: python generate_icon.py
 
+      - name: Fetch bundled tools (ffmpeg / aria2c)
+        run: python fetch_binaries.py
+
       - name: Build executable
         run: pyinstaller nazzil.spec
 

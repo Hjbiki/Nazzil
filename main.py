@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Nazzil — YouTube downloader entry point.
+Nazzil — video downloader entry point (YouTube + 1800 other sites).
 
 pip install -r requirements.txt
-External tools: ffmpeg (required for 4K merge / MP3),
-                aria2c (optional faster downloads)
+
+External tools (ffmpeg / ffprobe / aria2c) ship bundled with the app and are
+resolved by binaries.py — no manual install needed. From a stripped source
+checkout they're fetched silently on first run.
 """
 
 import os
@@ -24,14 +26,16 @@ from PySide6.QtWidgets import QApplication     # noqa: E402
 try:
     import yt_dlp  # noqa: F401, E402
 except ImportError:
-    print("yt-dlp not installed. Run: pip install yt-dlp")
+    # yt-dlp is bundled inside the frozen app; this path only happens on a
+    # source checkout with missing deps. No user-facing install instruction.
+    sys.stderr.write("yt-dlp module unavailable.\n")
     sys.exit(1)
 
 from config import DEFAULT_LANG, load_config   # noqa: E402
 from fonts import load_app_fonts               # noqa: E402
 from i18n import Translator                    # noqa: E402
 from ui.app import App                         # noqa: E402
-from ui.theme import THEME_QSS                 # noqa: E402
+from ui.theme import apply_theme               # noqa: E402
 
 
 ASSETS_DIR = os.path.join(_HERE, "assets")
@@ -55,9 +59,22 @@ def _ensure_icon():
 def main():
     _ensure_icon()
 
+    # ffmpeg / ffprobe / aria2c are bundled (installer) or fetched silently
+    # on first run for the lean portable exe. That check lives in App so it
+    # can show a non-blocking "Preparing…" status instead of a frozen window.
+
     app = QApplication(sys.argv)
     app.setApplicationName("Nazzil")
     app.setQuitOnLastWindowClosed(False)  # closing the window → minimize to tray
+
+    # Single instance: if Nazzil is already running (incl. hidden in the
+    # tray), ask that copy to show itself and exit — never open a 2nd window.
+    from single_instance import SingleInstance
+    single = SingleInstance()
+    if single.is_running():
+        single.ping_primary()
+        return
+    single.start_server()
 
     # Register bundled fonts BEFORE the stylesheet is applied so the QSS
     # `font-family: "Thmanyah Sans"` selector resolves against the family
@@ -71,13 +88,17 @@ def main():
     app.setLayoutDirection(
         Qt.RightToLeft if Translator.is_rtl() else Qt.LeftToRight)
 
-    app.setStyleSheet(THEME_QSS)
+    # Apply the saved theme (dark / light). apply_theme also rebinds the
+    # ui.theme colour constants so any widget built later uses this palette.
+    apply_theme(app, cfg.get("theme", "dark"))
 
     icon = QIcon(ICON_PATH) if os.path.exists(ICON_PATH) else QIcon()
     if not icon.isNull():
         app.setWindowIcon(icon)
 
     window = App(app_icon=icon)
+    # A second launch pings us → bring the existing window to the front.
+    single.activated.connect(window._tray_show)
     window.show()
     window.start_update_check()
     sys.exit(app.exec())
